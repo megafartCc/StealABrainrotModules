@@ -225,4 +225,28 @@ function module.setup(opts)
     }
 end
 
+local function tryAutoAttach()
+    local env = nil
+    pcall(function()
+        env = getgenv and getgenv()
+    end)
+    local autoSection = nil
+    local autoTheme = {}
+    local autoDefaultColor = nil
+    if env then
+        autoSection = env.PlayerESPSection or (env.sections and env.sections.esp) or env.ESPSection
+        autoTheme = env.PlayerESPTheme or env.theme or {}
+        autoDefaultColor = env.PlayerESPDefaultColor
+    end
+    if autoSection and type(autoSection.CreateToggle) == 'function' then
+        module.instance = module.setup({
+            section = autoSection,
+            theme = autoTheme,
+            defaultColor = autoDefaultColor,
+        })
+    end
+end
+
+tryAutoAttach()
+
 return module
