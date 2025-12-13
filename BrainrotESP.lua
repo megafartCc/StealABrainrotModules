@@ -1,3 +1,4 @@
+
 local Players = game:GetService('Players')
 local ReplicatedStorage = game:GetService('ReplicatedStorage')
 local Workspace = game:GetService('Workspace')
@@ -163,11 +164,10 @@ function module.setup(opts)
         THEME.panel2 = theme.panel2 or THEME.panel2
         THEME.text = theme.text or THEME.text
         THEME.gold = theme.gold or THEME.gold
-        local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
         for _, visuals in pairs(activeBrainrotVisuals) do
             if visuals.hl then
-                -- Reworked highlight to be outline only (FillTransparency=1, OutlineTransparency=0.15)
-                visuals.hl.OutlineColor = outlineColor
+                visuals.hl.FillColor = THEME.accentA
+                visuals.hl.OutlineColor = THEME.accentB
             end
             if visuals.tracer then
                 visuals.tracer.Color = ColorSequence.new({
@@ -185,7 +185,6 @@ function module.setup(opts)
                     end
                 end
             end
-            -- Note: visuals.labelStroke was removed from createOrUpdateBrainrotVisuals, so no update needed here.
         end
     end
     applyTheme(theme)
@@ -331,7 +330,7 @@ function module.setup(opts)
                     if v:IsA('StringValue') then
                         table.insert(traits, v.Value)
                     end
-                }
+                end
             end
         end
         if type(traits) == 'string' then
@@ -381,7 +380,7 @@ function module.setup(opts)
                 if TraitsData[trait] and trait == 'Sleepy' then
                     sleepy = true
                 end
-            }
+            end
         end
         local gen = baseGen * mult
         if sleepy then
@@ -803,22 +802,19 @@ function module.setup(opts)
                 isStand = info.isStand,
             }
             visuals.hl = Instance.new('Highlight')
-            local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
             visuals.hl.FillColor = THEME.accentA
-            visuals.hl.OutlineColor = outlineColor
-            visuals.hl.FillTransparency = 1 -- Set to 1 for outline only
-            visuals.hl.OutlineTransparency = 0.15 -- Set to 0.15 for a visible outline
+            visuals.hl.OutlineColor = THEME.accentB
+            visuals.hl.FillTransparency = 0.35
+            visuals.hl.OutlineTransparency = 0.1
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
-            
             visuals.esp = Instance.new('BillboardGui')
             visuals.esp.Name = 'ESPName'
             visuals.esp.AlwaysOnTop = true
             visuals.esp.Adornee = info.root
             visuals.esp.Size = UDim2.new(0, 150, 0, 34)
             visuals.esp.Parent = info.root
-            
             local bgFrame = Instance.new('Frame', visuals.esp)
             bgFrame.Size = UDim2.new(1, 0, 1, 0)
             bgFrame.BackgroundColor3 = THEME.panel2
@@ -827,7 +823,6 @@ function module.setup(opts)
             local stroke = Instance.new('UIStroke', bgFrame)
             stroke.Color = THEME.accentA
             stroke.Thickness = 1
-            
             visuals.label = Instance.new('TextLabel', bgFrame)
             visuals.label.Size = UDim2.new(1, -6, 1, -4)
             visuals.label.Position = UDim2.new(0, 3, 0, 2)
@@ -838,9 +833,6 @@ function module.setup(opts)
             visuals.label.TextScaled = false
             visuals.label.TextSize = 13
             visuals.label.TextWrapped = true
-            
-            -- Removed the UIStroke for the label (visuals.labelStroke) to prevent text glow
-            
             visuals.att0 = Instance.new('Attachment', getHRP())
             visuals.att1 = Instance.new('Attachment', info.root)
             visuals.tracer = Instance.new('Beam', info.root)
@@ -872,8 +864,6 @@ function module.setup(opts)
         visuals.tracer.Attachment1 = visuals.att1
         visuals.esp.Adornee = info.root
         visuals.esp.Parent = info.root
-        
-        -- Ensure Adornee is the model for best outline coverage
         visuals.hl.Adornee = info.model or info.root or target
         visuals.hl.Parent = info.model or target or info.root
     end
