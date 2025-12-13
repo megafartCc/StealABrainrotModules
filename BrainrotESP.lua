@@ -185,6 +185,9 @@ function module.setup(opts)
                     end
                 end
             end
+            if visuals.labelStroke then
+                visuals.labelStroke.Color = THEME.accentB
+            end
         end
     end
     applyTheme(theme)
@@ -833,6 +836,10 @@ function module.setup(opts)
             visuals.label.TextScaled = false
             visuals.label.TextSize = 13
             visuals.label.TextWrapped = true
+            visuals.labelStroke = Instance.new('UIStroke', visuals.label)
+            visuals.labelStroke.Thickness = 1
+            visuals.labelStroke.Color = THEME.accentB
+            visuals.labelStroke.Transparency = 0.15
             visuals.att0 = Instance.new('Attachment', getHRP())
             visuals.att1 = Instance.new('Attachment', info.root)
             visuals.tracer = Instance.new('Beam', info.root)
@@ -1079,3 +1086,4 @@ function module.setup(opts)
 end
 
 return module
+
