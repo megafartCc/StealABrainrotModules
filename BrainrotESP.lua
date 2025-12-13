@@ -1057,7 +1057,7 @@ function module.setup(opts)
     local brainrotToggle = section:CreateToggle({
         Title = 'Brainrot ESP',
         Default = false,
-        SaveKey = 'brainrot_esp_enabled',
+        SaveKey = 'brainrot_esp_enabled',a
         Callback = function(value)
             if value then
                 startBrainrotESP()
