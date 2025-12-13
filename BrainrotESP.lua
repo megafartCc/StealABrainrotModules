@@ -1,5 +1,6 @@
 local module = {}
 
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -94,7 +95,7 @@ local function formatNumber(value)
     local working = value
     local index = 1
     while math.abs(working) >= 1000 and index < #suffixes do
-        working /= 1000
+        working = working / 1000
         index += 1
     end
 
@@ -114,11 +115,12 @@ local function buildModuleState(opts)
     local section = opts.section
     local theme = opts.theme or {}
     local notify = opts.notify or defaultNotify
+    local player = opts.player or Players.LocalPlayer
 
     local accentColor = theme.accent or Color3.fromRGB(50, 130, 250)
     local frameColor = theme.panel2 or Color3.fromRGB(16, 18, 24)
     local textColor = theme.text or Color3.fromRGB(230, 235, 240)
-    local rateColor = theme.accentB or Color3.fromRGB(170, 210, 255)
+    local rateColor = textColor
 
     local state = {
         section = section,
@@ -132,9 +134,135 @@ local function buildModuleState(opts)
         tracked = {},
         heartbeatAccumulator = 0,
         observers = {},
+        player = player,
     }
 
     return state
+end
+
+local function destroyBeam(state)
+    if state.beam then
+        state.beam:Destroy()
+        state.beam = nil
+    end
+    if state.beamAttachment0 then
+        state.beamAttachment0:Destroy()
+        state.beamAttachment0 = nil
+    end
+end
+
+local function updatePlayerAttachment(state)
+    if state.beamAttachment0 then
+        state.beamAttachment0:Destroy()
+        state.beamAttachment0 = nil
+    end
+    if state.hrp then
+        local attachment = Instance.new("Attachment")
+        attachment.Name = "BrainrotESPPlayerAttachment"
+        attachment.Parent = state.hrp
+        state.beamAttachment0 = attachment
+    end
+    if state.beam then
+        state.beam.Attachment0 = state.beamAttachment0
+    end
+end
+
+local function ensureBeam(state)
+    if state.beam then
+        return
+    end
+    local beam = Instance.new("Beam")
+    beam.Name = "BrainrotESPBeam"
+    beam.Color = ColorSequence.new(state.accentColor)
+    beam.Width0 = 0.1
+    beam.Width1 = 0.1
+    beam.LightEmission = 0.4
+    beam.FaceCamera = true
+    beam.Transparency = NumberSequence.new(0.1)
+    beam.Enabled = false
+    beam.Parent = Workspace
+    state.beam = beam
+    updatePlayerAttachment(state)
+end
+
+local function setBeamTarget(state, meta)
+    state.bestMeta = meta
+    if not state.mostExpensiveOnly then
+        if state.beam then
+            state.beam.Enabled = false
+        end
+        return
+    end
+
+    ensureBeam(state)
+    updatePlayerAttachment(state)
+
+    if state.beam and state.beamAttachment0 and meta and meta.targetAttachment then
+        state.beam.Attachment0 = state.beamAttachment0
+        state.beam.Attachment1 = meta.targetAttachment
+        state.beam.Enabled = true
+    else
+        if state.beam then
+            state.beam.Enabled = false
+        end
+    end
+end
+
+local function setCharacter(state, character)
+    if state.charChildAdded then
+        state.charChildAdded:Disconnect()
+        state.charChildAdded = nil
+    end
+    if state.charRemovingConn then
+        state.charRemovingConn:Disconnect()
+        state.charRemovingConn = nil
+    end
+
+    state.character = character
+    state.hrp = character and character:FindFirstChild("HumanoidRootPart") or nil
+    updatePlayerAttachment(state)
+
+    if character then
+        state.charChildAdded = character.ChildAdded:Connect(function(child)
+            if child.Name == "HumanoidRootPart" then
+                state.hrp = child
+                updatePlayerAttachment(state)
+                setBeamTarget(state, state.bestMeta)
+            end
+        end)
+        state.charRemovingConn = character.ChildRemoved:Connect(function(child)
+            if child == state.hrp then
+                state.hrp = nil
+                updatePlayerAttachment(state)
+                setBeamTarget(state, state.bestMeta)
+            end
+        end)
+    end
+end
+
+local function bindPlayer(state)
+    local player = state.player
+    if not player then
+        return
+    end
+
+    if state.charAddedConn then
+        state.charAddedConn:Disconnect()
+    end
+    if state.charRemovingPlayerConn then
+        state.charRemovingPlayerConn:Disconnect()
+    end
+
+    state.charAddedConn = player.CharacterAdded:Connect(function(char)
+        setCharacter(state, char)
+    end)
+    state.charRemovingPlayerConn = player.CharacterRemoving:Connect(function()
+        setCharacter(state, nil)
+    end)
+
+    if player.Character then
+        setCharacter(state, player.Character)
+    end
 end
 
 local function ensureAnimalData(state)
@@ -213,26 +341,31 @@ local function refreshMostExpensiveVisibility(state)
 
     if not state.mostExpensiveOnly then
         for _, meta in pairs(tracked) do
-            setVisualVisibility(meta, true)
+            setVisualVisibility(meta, state.enabled)
         end
+        setBeamTarget(state, nil)
         return
     end
 
     local bestIncome = -math.huge
+    local bestMeta = nil
     for _, meta in pairs(tracked) do
-        bestIncome = math.max(bestIncome, meta.income or 0)
+        local income = meta.income or 0
+        if income > bestIncome then
+            bestIncome = income
+            bestMeta = meta
+        end
+    end
+
+    for _, meta in pairs(tracked) do
+        local visible = bestIncome ~= -math.huge and (meta.income or 0) >= bestIncome - 1e-6
+        setVisualVisibility(meta, visible)
     end
 
     if bestIncome == -math.huge then
-        for _, meta in pairs(tracked) do
-            setVisualVisibility(meta, false)
-        end
-        return
-    end
-
-    for _, meta in pairs(tracked) do
-        local visible = (meta.income or 0) >= bestIncome - 1e-6
-        setVisualVisibility(meta, visible)
+        setBeamTarget(state, nil)
+    else
+        setBeamTarget(state, bestMeta)
     end
 end
 
@@ -278,6 +411,14 @@ local function cleanupBrainrot(state, model)
         meta.highlight:Destroy()
     end
 
+    if meta.targetAttachment then
+        meta.targetAttachment:Destroy()
+    end
+
+    if state.bestMeta == meta then
+        setBeamTarget(state, nil)
+    end
+
     state.tracked[model] = nil
 end
 
@@ -309,7 +450,7 @@ local function createBrainrotEsp(state, model)
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "BrainrotESPBillboard"
     billboard.AlwaysOnTop = true
-    billboard.Size = UDim2.new(0, 140, 0, 30)
+    billboard.Size = UDim2.new(0, 170, 0, 34)
     billboard.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
     billboard.MaxDistance = 1200
     billboard.LightInfluence = 0
@@ -340,14 +481,14 @@ local function createBrainrotEsp(state, model)
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "BrainrotESPName"
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Size = UDim2.new(1, -8, 0, 16)
+    nameLabel.Size = UDim2.new(1, -8, 0, 18)
     nameLabel.Position = UDim2.new(0, 4, 0, 3)
-    nameLabel.Font = Enum.Font.GothamSemibold
+    nameLabel.Font = Enum.Font.GothamBold
     nameLabel.TextColor3 = state.textColor
     nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
     nameLabel.TextStrokeTransparency = 0.4
     nameLabel.TextScaled = false
-    nameLabel.TextSize = 14
+    nameLabel.TextSize = 15
     nameLabel.TextXAlignment = Enum.TextXAlignment.Center
     nameLabel.TextYAlignment = Enum.TextYAlignment.Top
     nameLabel.ClipsDescendants = true
@@ -356,18 +497,22 @@ local function createBrainrotEsp(state, model)
     local rateLabel = Instance.new("TextLabel")
     rateLabel.Name = "BrainrotESPRate"
     rateLabel.BackgroundTransparency = 1
-    rateLabel.Size = UDim2.new(1, -8, 0, 12)
-    rateLabel.Position = UDim2.new(0, 4, 0, 18)
-    rateLabel.Font = Enum.Font.GothamSemibold
-    rateLabel.TextColor3 = state.rateColor
+    rateLabel.Size = UDim2.new(1, -8, 0, 14)
+    rateLabel.Position = UDim2.new(0, 4, 0, 20)
+    rateLabel.Font = Enum.Font.GothamBold
+    rateLabel.TextColor3 = state.textColor
     rateLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-    rateLabel.TextStrokeTransparency = 0.55
+    rateLabel.TextStrokeTransparency = 0.4
     rateLabel.TextScaled = false
-    rateLabel.TextSize = 12
+    rateLabel.TextSize = 13
     rateLabel.TextXAlignment = Enum.TextXAlignment.Center
     rateLabel.TextYAlignment = Enum.TextYAlignment.Top
     rateLabel.ClipsDescendants = true
     rateLabel.Parent = frame
+
+    local targetAttachment = Instance.new("Attachment")
+    targetAttachment.Name = "BrainrotESPTarget"
+    targetAttachment.Parent = adornee
 
     local meta = {
         highlight = highlight,
@@ -377,6 +522,7 @@ local function createBrainrotEsp(state, model)
         rateLabel = rateLabel,
         connections = {},
         income = 0,
+        targetAttachment = targetAttachment,
     }
 
     state.tracked[model] = meta
@@ -527,6 +673,7 @@ local function stopEsp(state)
     state.enabled = false
     disconnectObservers(state)
     cleanupAll(state)
+    destroyBeam(state)
 end
 
 local function setupToggles(state, controls)
@@ -564,6 +711,7 @@ end
 
 function module.setup(opts)
     local state = buildModuleState(opts)
+    bindPlayer(state)
     local controls = {
         start = function()
             startEsp(state)
@@ -582,5 +730,3 @@ function module.setup(opts)
 end
 
 return module
-
-
