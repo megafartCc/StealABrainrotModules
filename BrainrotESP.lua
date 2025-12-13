@@ -1,4 +1,3 @@
-
 local Players = game:GetService('Players')
 local ReplicatedStorage = game:GetService('ReplicatedStorage')
 local Workspace = game:GetService('Workspace')
@@ -164,10 +163,11 @@ function module.setup(opts)
         THEME.panel2 = theme.panel2 or THEME.panel2
         THEME.text = theme.text or THEME.text
         THEME.gold = theme.gold or THEME.gold
+        local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
         for _, visuals in pairs(activeBrainrotVisuals) do
             if visuals.hl then
-                visuals.hl.FillColor = THEME.accentA
-                visuals.hl.OutlineColor = THEME.accentB
+                -- Highlight outline color is derived from accentA
+                visuals.hl.OutlineColor = outlineColor
             end
             if visuals.tracer then
                 visuals.tracer.Color = ColorSequence.new({
@@ -185,6 +185,7 @@ function module.setup(opts)
                     end
                 end
             end
+            -- visuals.labelStroke is no longer created, so no need to update it.
         end
     end
     applyTheme(theme)
@@ -218,12 +219,12 @@ function module.setup(opts)
             if not mutationMultipliers[k] then
                 mutationMultipliers[k] = v
             end
-        end
+        }
         for k, v in pairs(fallbackTraitMultipliers) do
             if not traitMultipliers[k] then
                 traitMultipliers[k] = v
             end
-        end
+        }
     end
 
     local function buildDynamicDictionary()
@@ -330,7 +331,7 @@ function module.setup(opts)
                     if v:IsA('StringValue') then
                         table.insert(traits, v.Value)
                     end
-                end
+                }
             end
         end
         if type(traits) == 'string' then
@@ -380,7 +381,7 @@ function module.setup(opts)
                 if TraitsData[trait] and trait == 'Sleepy' then
                     sleepy = true
                 end
-            end
+            }
         end
         local gen = baseGen * mult
         if sleepy then
@@ -569,95 +570,25 @@ function module.setup(opts)
         return brainrotName, moneyText
     end
 
-    local function getModelRootPart(model)
-        if not model then
-            return nil
-        end
-        return model:FindFirstChild('RootPart')
-            or model:FindFirstChild('HumanoidRootPart')
-            or model.PrimaryPart
-            or model:FindFirstChildWhichIsA('BasePart', true)
-    end
-
-    local function isLikelyBrainrotModel(model, desiredName)
-        if not model then
-            return false
-        end
-        if desiredName and tostring(model.Name):lower() == tostring(desiredName):lower() then
-            return true
-        end
-        if getBrainrotEntryByName(model.Name) then
-            return true
-        end
-        if model:GetAttribute('Mutation') or model:GetAttribute('Traits') or model:GetAttribute('Trait') then
-            return true
-        end
-        if model:FindFirstChild('Mutation') or model:FindFirstChild('MutationFolder') or model:FindFirstChild('Mutations') then
-            return true
-        end
-        if model:FindFirstChild('Traits') or model:FindFirstChild('TraitsFolder') then
-            return true
-        end
-        if model:FindFirstChildOfClass('Humanoid') or model:FindFirstChildOfClass('AnimationController') then
-            return true
-        end
-        if model:FindFirstChildWhichIsA('MeshPart', true) or model:FindFirstChildWhichIsA('SkinnedMeshPart', true) then
-            return true
-        end
-        return false
-    end
-
-    local function findBrainrotModelOnStand(stand, desiredName)
+    local function findBrainrotModelOnStand(stand)
         if not stand or not stand.Parent then
             return nil
         end
-        local spawnPos = nil
-        do
-            local base = stand:FindFirstChild('Base')
-            local spawn = base and base:FindFirstChild('Spawn')
-            if spawn and spawn:IsA('BasePart') then
-                spawnPos = spawn.Position
-            end
-        end
-        local bestLikelyModel, bestLikelyRoot, bestLikelyDist = nil, nil, math.huge
-        local bestModel, bestRoot, bestDist = nil, nil, math.huge
         for _, desc in ipairs(stand:GetDescendants()) do
-            if desc:IsA('Model') and desc ~= stand then
-                if desc.Name ~= 'Base' and desc.Name ~= 'PlotSign' and not desc:FindFirstChild('Spawn') then
-                    local root = getModelRootPart(desc)
-                    if root then
-                        local dist = 0
-                        if spawnPos then
-                            dist = (root.Position - spawnPos).Magnitude
-                        end
-                        if isLikelyBrainrotModel(desc, desiredName) then
-                            if dist < bestLikelyDist then
-                                bestLikelyDist = dist
-                                bestLikelyModel = desc
-                                bestLikelyRoot = root
-                            end
-                        elseif dist < bestDist then
-                            bestDist = dist
-                            bestModel = desc
-                            bestRoot = root
-                        end
-                    end
+            if desc:IsA('Model') then
+                local root = desc:FindFirstChild('RootPart') or desc:FindFirstChild('HumanoidRootPart') or desc.PrimaryPart
+                if root and (getBrainrotEntryByName(desc.Name) or desc:FindFirstChild('Mutation') or desc:GetAttribute('Mutation')) then
+                    return desc, root
                 end
             end
         end
-        if bestLikelyRoot then
-            return bestLikelyModel, bestLikelyRoot
-        end
-        if bestRoot then
-            return bestModel, bestRoot
-        end
     end
 
-    local function getStandRootPart(stand, desiredName)
+    local function getStandRootPart(stand)
         if not stand or not stand.Parent then
             return nil
         end
-        local model, root = findBrainrotModelOnStand(stand, desiredName)
+        local model, root = findBrainrotModelOnStand(stand)
         if root then
             return model, root
         end
@@ -784,16 +715,16 @@ function module.setup(opts)
         if type(animalData) ~= 'table' then
             return nil
         end
+        local model, root = getStandRootPart(stand)
+        if not root then
+            return nil
+        end
         local resolvedName
         if animalData.Index and AnimalsData[animalData.Index] then
             local entry = AnimalsData[animalData.Index]
             resolvedName = entry.DisplayName or animalData.Index
         else
-            resolvedName = animalData.Index or resolveBrainrotName(stand, nil) or 'Brainrot'
-        end
-        local model, root = getStandRootPart(stand, resolvedName)
-        if not root then
-            return nil
+            resolvedName = animalData.Index or resolveBrainrotName(stand, model) or 'Brainrot'
         end
         local computedGen = computeGeneration(animalData.Index, animalData.Mutation, animalData.Traits, channel and channel:Get('Owner'))
         local moneyValue = tonumber(computedGen) or 0
@@ -872,12 +803,13 @@ function module.setup(opts)
                 isStand = info.isStand,
             }
             visuals.hl = Instance.new('Highlight')
+            local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
             visuals.hl.FillColor = THEME.accentA
-            visuals.hl.OutlineColor = THEME.accentB
-            visuals.hl.FillTransparency = 0.35
-            visuals.hl.OutlineTransparency = 0.1
+            visuals.hl.OutlineColor = outlineColor
+            visuals.hl.FillTransparency = 1 -- Set to 1 for outline only
+            visuals.hl.OutlineTransparency = 0.15 -- Set to 0.15 for a visible outline
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            visuals.hl.Adornee = nil
+            visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
             visuals.esp = Instance.new('BillboardGui')
             visuals.esp.Name = 'ESPName'
@@ -903,6 +835,7 @@ function module.setup(opts)
             visuals.label.TextScaled = false
             visuals.label.TextSize = 13
             visuals.label.TextWrapped = true
+            -- REMOVED visuals.labelStroke to remove text glow
             visuals.att0 = Instance.new('Attachment', getHRP())
             visuals.att1 = Instance.new('Attachment', info.root)
             visuals.tracer = Instance.new('Beam', info.root)
@@ -934,9 +867,8 @@ function module.setup(opts)
         visuals.tracer.Attachment1 = visuals.att1
         visuals.esp.Adornee = info.root
         visuals.esp.Parent = info.root
-        -- Match the working ESP style: parent the Highlight to the model (no explicit Adornee).
-        visuals.hl.Adornee = nil
-        visuals.hl.Parent = info.model or info.root
+        visuals.hl.Adornee = info.model or info.root or target
+        visuals.hl.Parent = info.model or target or info.root
     end
 
     local function cleanupBrainrotVisualsForRemoved(target)
@@ -1150,4 +1082,3 @@ function module.setup(opts)
 end
 
 return module
-
