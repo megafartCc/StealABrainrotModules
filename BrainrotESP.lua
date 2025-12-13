@@ -175,12 +175,6 @@ function module.setup(opts)
                     ColorSequenceKeypoint.new(1, THEME.accentB),
                 })
             end
-            if visuals.box then
-                visuals.box.LineThickness = 0.05
-                visuals.box.Color3 = THEME.accentB
-                visuals.box.SurfaceColor3 = THEME.accentA
-                visuals.box.SurfaceTransparency = 0.9
-            end
             if visuals.esp then
                 local bg = visuals.esp:FindFirstChildWhichIsA('Frame')
                 if bg then
@@ -813,8 +807,8 @@ function module.setup(opts)
             visuals.hl = Instance.new('Highlight')
             visuals.hl.FillColor = THEME.accentA
             visuals.hl.OutlineColor = THEME.accentB
-            visuals.hl.FillTransparency = 0.35
-            visuals.hl.OutlineTransparency = 0.1
+            visuals.hl.FillTransparency = 0.2
+            visuals.hl.OutlineTransparency = 0
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
@@ -824,13 +818,6 @@ function module.setup(opts)
             visuals.esp.Adornee = info.root
             visuals.esp.Size = UDim2.new(0, 150, 0, 34)
             visuals.esp.Parent = info.root
-            visuals.box = Instance.new('SelectionBox')
-            visuals.box.LineThickness = 0.05
-            visuals.box.Color3 = THEME.accentB
-            visuals.box.SurfaceColor3 = THEME.accentA
-            visuals.box.SurfaceTransparency = 0.9
-            visuals.box.Adornee = info.root
-            visuals.box.Parent = info.root
             local bgFrame = Instance.new('Frame', visuals.esp)
             bgFrame.Size = UDim2.new(1, 0, 1, 0)
             bgFrame.BackgroundColor3 = THEME.panel2
@@ -882,10 +869,6 @@ function module.setup(opts)
             visuals.att1.Parent = info.root
         end
         visuals.tracer.Attachment1 = visuals.att1
-        if visuals.box then
-            visuals.box.Adornee = info.root
-            visuals.box.Parent = info.root
-        end
         visuals.esp.Adornee = info.root
         visuals.esp.Parent = info.root
         visuals.hl.Adornee = info.model or info.root or target
@@ -998,9 +981,6 @@ function module.setup(opts)
                     visuals.esp.Enabled = shouldBeVisible
                     visuals.hl.Enabled = shouldBeVisible
                     visuals.tracer.Enabled = shouldBeVisible
-                    if visuals.box then
-                        visuals.box.Visible = shouldBeVisible
-                    end
                 end
                 if shouldBeVisible then
                     local dist = (playerRoot.Position - visuals.root.Position).Magnitude
