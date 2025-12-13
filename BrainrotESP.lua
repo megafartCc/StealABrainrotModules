@@ -164,10 +164,11 @@ function module.setup(opts)
         THEME.panel2 = theme.panel2 or THEME.panel2
         THEME.text = theme.text or THEME.text
         THEME.gold = theme.gold or THEME.gold
+        local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
         for _, visuals in pairs(activeBrainrotVisuals) do
             if visuals.hl then
                 visuals.hl.FillColor = THEME.accentA
-                visuals.hl.OutlineColor = THEME.accentB
+                visuals.hl.OutlineColor = outlineColor
             end
             if visuals.tracer then
                 visuals.tracer.Color = ColorSequence.new({
@@ -805,10 +806,11 @@ function module.setup(opts)
                 isStand = info.isStand,
             }
             visuals.hl = Instance.new('Highlight')
+            local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
             visuals.hl.FillColor = THEME.accentA
-            visuals.hl.OutlineColor = THEME.accentB
-            visuals.hl.FillTransparency = 0.2
-            visuals.hl.OutlineTransparency = 0
+            visuals.hl.OutlineColor = outlineColor
+            visuals.hl.FillTransparency = 0.6
+            visuals.hl.OutlineTransparency = 0.6
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
@@ -1057,7 +1059,7 @@ function module.setup(opts)
     local brainrotToggle = section:CreateToggle({
         Title = 'Brainrot ESP',
         Default = false,
-        SaveKey = 'brainrot_esp_enabled',a
+        SaveKey = 'brainrot_esp_enabled',
         Callback = function(value)
             if value then
                 startBrainrotESP()
