@@ -96,7 +96,7 @@ local function formatNumber(value)
     local index = 1
     while math.abs(working) >= 1000 and index < #suffixes do
         working = working / 1000
-        index += 1
+        index = index + 1
     end
 
     local absWorking = math.abs(working)
@@ -636,7 +636,7 @@ local function attachHeartbeat(state)
 
     state.heartbeatAccumulator = 0
     state.observers.heartbeat = RunService.Heartbeat:Connect(function(delta)
-        state.heartbeatAccumulator += delta
+        state.heartbeatAccumulator = state.heartbeatAccumulator + delta
         if state.heartbeatAccumulator < 1 then
             return
         end
