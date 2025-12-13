@@ -73,10 +73,13 @@ local function setup(opts)
         end
         if moneyValue == 0 then
             for _, d in ipairs(stand:GetDescendants()) do
-                if d:IsA('NumberValue') or d:IsA('IntValue') then
-                    if d.Name:lower():find('moneypersec') or d.Name:lower():find('mps') then
-                        moneyValue = tonumber(d.Value) or moneyValue
-                        break
+                if d:IsA('NumberValue') or d:IsA('IntValue') or d:IsA('DoubleConstrainedValue') then
+                    local n = (d.Name or ''):lower()
+                    if n:find('moneypersec') or n:find('mps') or n:find('money') then
+                        local val = tonumber(d.Value) or 0
+                        if val > moneyValue then
+                            moneyValue = val
+                        end
                     end
                 end
             end
@@ -87,7 +90,21 @@ local function setup(opts)
     local function resolveName(stand, model)
         local name = stand:GetAttribute('Brainrot') or (model and model:GetAttribute('Brainrot'))
         if not name or name == '' then
-            name = stand:GetAttribute('Name') or (model and model:GetAttribute('Name')) or (model and model.Name) or stand.Name
+            name = stand:GetAttribute('Name') or (model and model:GetAttribute('Name'))
+        end
+        if (not name or name == '') and model and model:FindFirstChildWhichIsA('StringValue', true) then
+            for _, sv in ipairs(model:GetDescendants()) do
+                if sv:IsA('StringValue') then
+                    local n = (sv.Name or ''):lower()
+                    if n:find('brainrot') or n:find('name') then
+                        name = sv.Value
+                        break
+                    end
+                end
+            end
+        end
+        if not name or name == '' then
+            name = model and model.Name or stand.Name
         end
         return name or 'Brainrot'
     end
