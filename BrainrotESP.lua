@@ -299,10 +299,6 @@ local function isBrainrotModel(state, inst)
         return false
     end
 
-    if inst.Parent and inst.Parent.Name == "AnimalPodiums" then
-        return false
-    end
-
     if not CollectionService:HasTag(inst, "Animal") then
         return false
     end
