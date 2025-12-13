@@ -169,6 +169,10 @@ function module.setup(opts)
                 visuals.hl.FillColor = THEME.accentA
                 visuals.hl.OutlineColor = THEME.accentB
             end
+            if visuals.modelHighlight then
+                visuals.modelHighlight.FillColor = THEME.accentA
+                visuals.modelHighlight.OutlineColor = THEME.accentB
+            end
             if visuals.tracer then
                 visuals.tracer.Color = ColorSequence.new({
                     ColorSequenceKeypoint.new(0, THEME.accentA),
@@ -774,6 +778,11 @@ function module.setup(opts)
             visuals.hl:Destroy()
         end)
         pcall(function()
+            if visuals.modelHighlight then
+                visuals.modelHighlight:Destroy()
+            end
+        end)
+        pcall(function()
             visuals.esp:Destroy()
         end)
         pcall(function()
@@ -786,6 +795,31 @@ function module.setup(opts)
             visuals.att1:Destroy()
         end)
         activeBrainrotVisuals[target] = nil
+    end
+
+    local function setModelHighlightTarget(visuals, model)
+        if not visuals then
+            return
+        end
+        if model and not visuals.modelHighlight then
+            local outline = Instance.new('Highlight')
+            outline.Name = 'BrainrotModelOutline'
+            outline.FillColor = THEME.accentA
+            outline.OutlineColor = THEME.accentB
+            outline.FillTransparency = 1
+            outline.OutlineTransparency = 0
+            outline.DepthMode = Enum.HighlightDepthMode.Occluded
+            outline.Enabled = false
+            visuals.modelHighlight = outline
+        end
+        if visuals.modelHighlight then
+            visuals.modelHighlight.Adornee = model
+            if model then
+                visuals.modelHighlight.Parent = model
+            else
+                visuals.modelHighlight.Parent = nil
+            end
+        end
     end
 
     local function createOrUpdateBrainrotVisuals(info)
@@ -866,6 +900,7 @@ function module.setup(opts)
         visuals.esp.Parent = info.root
         visuals.hl.Adornee = info.model or info.root or target
         visuals.hl.Parent = info.model or target or info.root
+        setModelHighlightTarget(visuals, info.model)
     end
 
     local function cleanupBrainrotVisualsForRemoved(target)
@@ -975,6 +1010,9 @@ function module.setup(opts)
                     visuals.hl.Enabled = shouldBeVisible
                     visuals.tracer.Enabled = shouldBeVisible
                 end
+                if visuals.modelHighlight then
+                    visuals.modelHighlight.Enabled = shouldBeVisible
+                end
                 if shouldBeVisible then
                     local dist = (playerRoot.Position - visuals.root.Position).Magnitude
                     visuals.esp.StudsOffset = Vector3.new(0, math.clamp(4 + (dist / 50), 4, 10), 0)
@@ -1079,3 +1117,4 @@ function module.setup(opts)
 end
 
 return module
+
