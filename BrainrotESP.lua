@@ -453,7 +453,7 @@ local function createBrainrotEsp(state, model)
     billboard.Name = "BrainrotESPBillboard"
     billboard.AlwaysOnTop = true
     billboard.Size = UDim2.new(0, 170, 0, 34)
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5, 0)
     billboard.MaxDistance = 1200
     billboard.LightInfluence = 0
     billboard.Enabled = true
