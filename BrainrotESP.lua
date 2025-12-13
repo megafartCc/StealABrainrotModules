@@ -4,13 +4,11 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
 local HttpService = game:GetService("HttpService")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local datasFolder = ReplicatedStorage:WaitForChild("Datas")
 
-local trackedTags = {"Animal"}
 local attributeNames = {"Traits", "Mutation"}
 
 local function defaultNotify(title, text)
@@ -84,6 +82,17 @@ local function findPlotModel(inst)
         current = current.Parent
     end
     return nil
+end
+
+local function isInsideAnimalPodiums(inst)
+    local current = inst and inst.Parent
+    while current and current ~= Workspace do
+        if current.Name == "AnimalPodiums" then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
 end
 
 local function formatNumber(value)
@@ -288,15 +297,11 @@ local function isBrainrotModel(state, inst)
         return false
     end
 
-    if not CollectionService:HasTag(inst, "Animal") then
-        return false
-    end
-
-    if not state.animalsData[inst.Name] then
-        return false
-    end
-
     if not Workspace:IsAncestorOf(inst) then
+        return false
+    end
+
+    if not isInsideAnimalPodiums(inst) then
         return false
     end
 
@@ -457,7 +462,7 @@ local function createBrainrotEsp(state, model)
     billboard.Name = "BrainrotESPBillboard"
     billboard.AlwaysOnTop = true
     billboard.Size = UDim2.new(0, 170, 0, 34)
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5, 0)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5.5, 0)
     billboard.MaxDistance = 1200
     billboard.LightInfluence = 0
     billboard.Enabled = true
@@ -507,9 +512,9 @@ local function createBrainrotEsp(state, model)
     rateLabel.Size = UDim2.new(1, -8, 0, 14)
     rateLabel.Position = UDim2.new(0, 4, 0, 20)
     rateLabel.Font = Enum.Font.GothamBold
-    rateLabel.TextColor3 = state.textColor
+    rateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     rateLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-    rateLabel.TextStrokeTransparency = 0.4
+    rateLabel.TextStrokeTransparency = 0.3
     rateLabel.TextScaled = false
     rateLabel.TextSize = 13
     rateLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -564,45 +569,12 @@ local function connectObservers(state)
             createBrainrotEsp(state, inst)
         end
     end)
-
-    state.observers.tagAdded = {}
-    state.observers.tagRemoved = {}
-
-    for _, tag in ipairs(trackedTags) do
-        local addedConn = CollectionService:GetInstanceAddedSignal(tag):Connect(function(inst)
-            if inst:IsA("Model") then
-                createBrainrotEsp(state, inst)
-            end
-        end)
-
-        local removedConn = CollectionService:GetInstanceRemovedSignal(tag):Connect(function(inst)
-            cleanupBrainrot(state, inst)
-            refreshMostExpensiveVisibility(state)
-        end)
-
-        state.observers.tagAdded[tag] = addedConn
-        state.observers.tagRemoved[tag] = removedConn
-    end
 end
 
 local function disconnectObservers(state)
     if state.observers.descendantAdded then
         state.observers.descendantAdded:Disconnect()
         state.observers.descendantAdded = nil
-    end
-
-    if state.observers.tagAdded then
-        for _, conn in pairs(state.observers.tagAdded) do
-            conn:Disconnect()
-        end
-        state.observers.tagAdded = nil
-    end
-
-    if state.observers.tagRemoved then
-        for _, conn in pairs(state.observers.tagRemoved) do
-            conn:Disconnect()
-        end
-        state.observers.tagRemoved = nil
     end
 
     if state.observers.heartbeat then
@@ -622,17 +594,6 @@ local function scanWorkspace(state)
     for _, descendant in ipairs(Workspace:GetDescendants()) do
         if descendant:IsA("Model") then
             createBrainrotEsp(state, descendant)
-        end
-    end
-
-    for _, tag in ipairs(trackedTags) do
-        local ok, results = pcall(CollectionService.GetTagged, CollectionService, tag)
-        if ok then
-            for _, inst in ipairs(results) do
-                if inst:IsA("Model") then
-                    createBrainrotEsp(state, inst)
-                end
-            end
         end
     end
 end
