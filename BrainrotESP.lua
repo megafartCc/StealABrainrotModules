@@ -66,6 +66,32 @@ local function setup(opts)
         visuals = {}
     end
 
+    local function resolveMoney(stand, model)
+        local moneyValue = tonumber(stand:GetAttribute('MoneyPerSec')) or 0
+        if moneyValue == 0 and model then
+            moneyValue = tonumber(model:GetAttribute('MoneyPerSec')) or 0
+        end
+        if moneyValue == 0 then
+            for _, d in ipairs(stand:GetDescendants()) do
+                if d:IsA('NumberValue') or d:IsA('IntValue') then
+                    if d.Name:lower():find('moneypersec') or d.Name:lower():find('mps') then
+                        moneyValue = tonumber(d.Value) or moneyValue
+                        break
+                    end
+                end
+            end
+        end
+        return moneyValue
+    end
+
+    local function resolveName(stand, model)
+        local name = stand:GetAttribute('Brainrot') or (model and model:GetAttribute('Brainrot'))
+        if not name or name == '' then
+            name = stand:GetAttribute('Name') or (model and model:GetAttribute('Name')) or (model and model.Name) or stand.Name
+        end
+        return name or 'Brainrot'
+    end
+
     local function buildInfoFromStand(stand)
         if not stand or not stand:IsA('Model') then
             return nil
@@ -79,15 +105,8 @@ local function setup(opts)
             return nil
         end
         local model = stand:FindFirstChildWhichIsA('Model') or stand:FindFirstChild('Brainrot')
-        local resolvedName = stand:GetAttribute('Brainrot') or stand.Name or 'Brainrot'
-        if model then
-            local attrName = model:GetAttribute('Brainrot') or model:GetAttribute('Name')
-            if attrName and attrName ~= '' then
-                resolvedName = attrName
-            end
-        end
-        local moneyAttr = stand:GetAttribute('MoneyPerSec') or (model and model:GetAttribute('MoneyPerSec'))
-        local moneyValue = tonumber(moneyAttr) or 0
+        local resolvedName = resolveName(stand, model)
+        local moneyValue = resolveMoney(stand, model)
         return {
             key = stand,
             root = root,
@@ -259,6 +278,7 @@ local function setup(opts)
     end
 
     local renderConn
+    local scanConn
     local function start()
         if enabled then
             return
@@ -268,6 +288,14 @@ local function setup(opts)
         if not renderConn then
             renderConn = RunService.RenderStepped:Connect(function()
                 updateVisibility()
+            end)
+        end
+        if not scanConn then
+            scanConn = task.spawn(function()
+                while enabled do
+                    rescan()
+                    task.wait(1.5)
+                end
             end)
         end
         if not connections.added then
@@ -283,6 +311,10 @@ local function setup(opts)
         if renderConn then
             renderConn:Disconnect()
             renderConn = nil
+        end
+        if scanConn then
+            task.cancel(scanConn)
+            scanConn = nil
         end
         for _, c in pairs(connections) do
             if typeof(c) == 'RBXScriptConnection' then
