@@ -185,7 +185,7 @@ function module.setup(opts)
                     end
                 end
             end
-            -- Removed visuals.labelStroke update as the stroke element is now removed
+            -- Note: visuals.labelStroke was removed from createOrUpdateBrainrotVisuals, so no update needed here.
         end
     end
     applyTheme(theme)
@@ -811,12 +811,14 @@ function module.setup(opts)
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
+            
             visuals.esp = Instance.new('BillboardGui')
             visuals.esp.Name = 'ESPName'
             visuals.esp.AlwaysOnTop = true
             visuals.esp.Adornee = info.root
             visuals.esp.Size = UDim2.new(0, 150, 0, 34)
             visuals.esp.Parent = info.root
+            
             local bgFrame = Instance.new('Frame', visuals.esp)
             bgFrame.Size = UDim2.new(1, 0, 1, 0)
             bgFrame.BackgroundColor3 = THEME.panel2
@@ -825,6 +827,7 @@ function module.setup(opts)
             local stroke = Instance.new('UIStroke', bgFrame)
             stroke.Color = THEME.accentA
             stroke.Thickness = 1
+            
             visuals.label = Instance.new('TextLabel', bgFrame)
             visuals.label.Size = UDim2.new(1, -6, 1, -4)
             visuals.label.Position = UDim2.new(0, 3, 0, 2)
@@ -836,7 +839,7 @@ function module.setup(opts)
             visuals.label.TextSize = 13
             visuals.label.TextWrapped = true
             
-            -- REMOVED visuals.labelStroke here to remove the text glow
+            -- Removed the UIStroke for the label (visuals.labelStroke) to prevent text glow
             
             visuals.att0 = Instance.new('Attachment', getHRP())
             visuals.att1 = Instance.new('Attachment', info.root)
@@ -869,6 +872,8 @@ function module.setup(opts)
         visuals.tracer.Attachment1 = visuals.att1
         visuals.esp.Adornee = info.root
         visuals.esp.Parent = info.root
+        
+        -- Ensure Adornee is the model for best outline coverage
         visuals.hl.Adornee = info.model or info.root or target
         visuals.hl.Parent = info.model or target or info.root
     end
