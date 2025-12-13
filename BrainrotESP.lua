@@ -86,6 +86,17 @@ local function findPlotModel(inst)
     return nil
 end
 
+local function isInsideAnimalPodiums(inst)
+    local current = inst and inst.Parent
+    while current and current ~= Workspace do
+        if current.Name == "AnimalPodiums" then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
+end
+
 local function formatNumber(value)
     if typeof(value) ~= "number" then
         return "0"
@@ -288,6 +299,10 @@ local function isBrainrotModel(state, inst)
         return false
     end
 
+    if inst.Parent and inst.Parent.Name == "AnimalPodiums" then
+        return false
+    end
+
     if not CollectionService:HasTag(inst, "Animal") then
         return false
     end
@@ -297,6 +312,10 @@ local function isBrainrotModel(state, inst)
     end
 
     if not Workspace:IsAncestorOf(inst) then
+        return false
+    end
+
+    if not isInsideAnimalPodiums(inst) then
         return false
     end
 
@@ -457,7 +476,7 @@ local function createBrainrotEsp(state, model)
     billboard.Name = "BrainrotESPBillboard"
     billboard.AlwaysOnTop = true
     billboard.Size = UDim2.new(0, 170, 0, 34)
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5, 0)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5.5, 0)
     billboard.MaxDistance = 1200
     billboard.LightInfluence = 0
     billboard.Enabled = true
@@ -507,9 +526,9 @@ local function createBrainrotEsp(state, model)
     rateLabel.Size = UDim2.new(1, -8, 0, 14)
     rateLabel.Position = UDim2.new(0, 4, 0, 20)
     rateLabel.Font = Enum.Font.GothamBold
-    rateLabel.TextColor3 = state.textColor
+    rateLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     rateLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-    rateLabel.TextStrokeTransparency = 0.4
+    rateLabel.TextStrokeTransparency = 0.3
     rateLabel.TextScaled = false
     rateLabel.TextSize = 13
     rateLabel.TextXAlignment = Enum.TextXAlignment.Center
