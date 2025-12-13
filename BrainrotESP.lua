@@ -6,21 +6,9 @@ local Workspace = game:GetService('Workspace')
 local localPlayer = Players.LocalPlayer
 local module = {}
 
-local Synchronizer = require(ReplicatedStorage:FindFirstChild('Packages') and ReplicatedStorage.Packages:FindFirstChild('Synchronizer') or ReplicatedStorage:WaitForChild('Packages'):WaitForChild('Synchronizer'))
-
 local function getHRP()
     local char = localPlayer and localPlayer.Character
     return char and char:FindFirstChild('HumanoidRootPart')
-end
-
-local function getTheme(opts)
-    local t = opts.theme or {}
-    return {
-        accentA = t.accentA or t.accent or Color3.fromRGB(64, 156, 255),
-        accentB = t.accentB or t.accent or Color3.fromRGB(0, 204, 204),
-        panel2 = t.panel2 or Color3.fromRGB(22, 24, 30),
-        text = t.text or Color3.fromRGB(230, 235, 240),
-    }
 end
 
 local function toTitle(str)
@@ -46,7 +34,11 @@ local function setup(opts)
     if not (section and section.CreateToggle) then
         return nil
     end
-    local theme = getTheme(opts)
+    local theme = opts.theme or {}
+    local accentA = theme.accentA or theme.accent or Color3.fromRGB(64, 156, 255)
+    local accentB = theme.accentB or theme.accent or Color3.fromRGB(0, 204, 204)
+    local panel2 = theme.panel2 or Color3.fromRGB(22, 24, 30)
+    local textColor = theme.text or Color3.fromRGB(230, 235, 240)
 
     local enabled = false
     local mostExpensiveOnly = false
@@ -129,8 +121,8 @@ local function setup(opts)
                 name = info.name or 'Brainrot',
             }
             v.hl = Instance.new('Highlight')
-            v.hl.FillColor = theme.accentA
-            v.hl.OutlineColor = theme.accentB
+            v.hl.FillColor = accentA
+            v.hl.OutlineColor = accentB
             v.hl.FillTransparency = 0.35
             v.hl.OutlineTransparency = 0.1
             v.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -146,7 +138,7 @@ local function setup(opts)
 
             local bg = Instance.new('Frame')
             bg.Size = UDim2.new(1, 0, 1, 0)
-            bg.BackgroundColor3 = theme.panel2
+            bg.BackgroundColor3 = panel2
             bg.BackgroundTransparency = 0.2
             bg.BorderSizePixel = 0
             bg.Parent = v.esp
@@ -154,7 +146,7 @@ local function setup(opts)
             corner.CornerRadius = UDim.new(0, 6)
             corner.Parent = bg
             local stroke = Instance.new('UIStroke')
-            stroke.Color = theme.accentA
+            stroke.Color = accentA
             stroke.Thickness = 1
             stroke.Parent = bg
 
@@ -163,7 +155,7 @@ local function setup(opts)
             v.label.Size = UDim2.new(1, -6, 1, -4)
             v.label.Position = UDim2.new(0, 3, 0, 2)
             v.label.Font = Enum.Font.GothamBold
-            v.label.TextColor3 = theme.text
+            v.label.TextColor3 = textColor
             v.label.RichText = true
             v.label.TextScaled = false
             v.label.TextSize = 13
@@ -177,8 +169,8 @@ local function setup(opts)
             v.tracer.Attachment1 = v.att1
             v.tracer.FaceCamera = true
             v.tracer.Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, theme.accentA),
-                ColorSequenceKeypoint.new(1, theme.accentB),
+                ColorSequenceKeypoint.new(0, accentA),
+                ColorSequenceKeypoint.new(1, accentB),
             })
             v.tracer.Width0 = 0.2
             v.tracer.Width1 = 0.1
@@ -331,26 +323,33 @@ local function setup(opts)
         brainrotToggle = brainrotToggle,
         mostExpensiveToggle = mostExpensiveToggle,
         setTheme = function(newTheme)
-            theme = getTheme({ theme = newTheme })
+            theme = newTheme or theme
+            accentA = theme.accentA or theme.accent or accentA
+            accentB = theme.accentB or theme.accent or accentB
+            panel2 = theme.panel2 or panel2
+            textColor = theme.text or textColor
             for _, v in pairs(visuals) do
                 if v.hl then
-                    v.hl.FillColor = theme.accentA
-                    v.hl.OutlineColor = theme.accentB
+                    v.hl.FillColor = accentA
+                    v.hl.OutlineColor = accentB
                 end
                 if v.tracer then
                     v.tracer.Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0, theme.accentA),
-                        ColorSequenceKeypoint.new(1, theme.accentB),
+                        ColorSequenceKeypoint.new(0, accentA),
+                        ColorSequenceKeypoint.new(1, accentB),
                     })
                 end
                 if v.esp then
                     local bg = v.esp:FindFirstChildWhichIsA('Frame')
                     if bg then
-                        bg.BackgroundColor3 = theme.panel2
+                        bg.BackgroundColor3 = panel2
                         local stroke = bg:FindFirstChildOfClass('UIStroke')
                         if stroke then
-                            stroke.Color = theme.accentA
+                            stroke.Color = accentA
                         end
+                    end
+                    if v.label then
+                        v.label.TextColor3 = textColor
                     end
                 end
             end
@@ -359,25 +358,5 @@ local function setup(opts)
 end
 
 module.setup = setup
-
-local function autoAttach()
-    local env
-    pcall(function()
-        env = getgenv and getgenv()
-    end)
-    if not env then
-        return
-    end
-    local targetSection = env.BrainrotESPSection or env.PlayerESPSection or (env.sections and env.sections.esp)
-    if targetSection and targetSection.CreateToggle then
-        module.instance = setup({
-            section = targetSection,
-            theme = env.PlayerESPTheme or env.BrainrotESPTheme or {},
-            defaultColor = env.PlayerESPDefaultColor,
-        })
-    end
-end
-
-autoAttach()
 
 return module
