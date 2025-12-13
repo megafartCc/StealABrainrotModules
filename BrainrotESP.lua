@@ -187,7 +187,7 @@ end
 
 local function setBeamTarget(state, meta)
     state.bestMeta = meta
-    if not state.mostExpensiveOnly then
+    if not state.mostExpensiveOnly or not state.enabled then
         if state.beam then
             state.beam.Enabled = false
         end
@@ -238,6 +238,8 @@ local function setCharacter(state, character)
             end
         end)
     end
+
+    setBeamTarget(state, state.bestMeta)
 end
 
 local function bindPlayer(state)
@@ -491,6 +493,7 @@ local function createBrainrotEsp(state, model)
     nameLabel.TextSize = 15
     nameLabel.TextXAlignment = Enum.TextXAlignment.Center
     nameLabel.TextYAlignment = Enum.TextYAlignment.Top
+    nameLabel.TextWrapped = true
     nameLabel.ClipsDescendants = true
     nameLabel.Parent = frame
 
@@ -507,6 +510,7 @@ local function createBrainrotEsp(state, model)
     rateLabel.TextSize = 13
     rateLabel.TextXAlignment = Enum.TextXAlignment.Center
     rateLabel.TextYAlignment = Enum.TextYAlignment.Top
+    rateLabel.TextWrapped = true
     rateLabel.ClipsDescendants = true
     rateLabel.Parent = frame
 
