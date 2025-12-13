@@ -43,7 +43,7 @@ local function hex(color)
     return string.format('%02x%02x%02x', math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
 end
 
-function module.setup(opts)
+local function setup(opts)
     local section = opts.section
     if not (section and section.CreateToggle) then
         return nil
@@ -369,5 +369,27 @@ function module.setup(opts)
         end,
     }
 end
+
+module.setup = setup
+
+local function autoAttach()
+    local env = nil
+    pcall(function()
+        env = getgenv and getgenv()
+    end)
+    if not env then
+        return
+    end
+    local targetSection = env.BrainrotESPSection or env.PlayerESPSection or (env.sections and env.sections.esp)
+    if targetSection and targetSection.CreateToggle then
+        module.instance = setup({
+            section = targetSection,
+            theme = env.PlayerESPTheme or env.BrainrotESPTheme or {},
+            defaultColor = env.PlayerESPDefaultColor,
+        })
+    end
+end
+
+autoAttach()
 
 return module
