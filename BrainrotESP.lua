@@ -5,6 +5,7 @@ local Workspace = game:GetService('Workspace')
 local RunService = game:GetService('RunService')
 
 local BrainrotESP = {}
+local singleton
 
 local function createFallbackSection()
     local stub = {}
@@ -1103,11 +1104,15 @@ local function createController(opts)
     }
 end
 
-function BrainrotESP.new(opts)
-    return createController(opts)
+function BrainrotESP.setup(opts)
+    singleton = createController(opts)
+    BrainrotESP.controller = singleton
+    return singleton
 end
 
-local singleton
+function BrainrotESP.new(opts)
+    return BrainrotESP.setup(opts)
+end
 
 function BrainrotESP.start(opts)
     opts = opts or {}
@@ -1125,6 +1130,7 @@ function BrainrotESP.start(opts)
     if singleton and singleton.start and autoStart ~= false then
         singleton.start()
     end
+    BrainrotESP.controller = singleton
     return singleton
 end
 
@@ -1156,6 +1162,9 @@ pcall(function()
     end
 end)
 
-BrainrotESP.controller = BrainrotESP.start(autoConfig)
+if next(autoConfig) ~= nil and autoConfig.autoStart ~= false then
+    BrainrotESP.controller = BrainrotESP.start(autoConfig)
+end
 
 return BrainrotESP
+
