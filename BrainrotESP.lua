@@ -6,20 +6,11 @@ local Workspace = game:GetService('Workspace')
 local localPlayer = Players.LocalPlayer
 local module = {}
 
-local function safe(promise)
-    local ok, res = pcall(promise)
-    if ok then
-        return res
-    end
-    return nil
-end
+local Synchronizer = require(ReplicatedStorage:FindFirstChild('Packages') and ReplicatedStorage.Packages:FindFirstChild('Synchronizer') or ReplicatedStorage:WaitForChild('Packages'):WaitForChild('Synchronizer'))
 
 local function getHRP()
     local char = localPlayer and localPlayer.Character
-    if not char then
-        return nil
-    end
-    return char:FindFirstChild('HumanoidRootPart')
+    return char and char:FindFirstChild('HumanoidRootPart')
 end
 
 local function getTheme(opts)
@@ -39,8 +30,15 @@ local function toTitle(str)
     return (str:gsub('^%l', string.upper))
 end
 
-local function hex(color)
-    return string.format('%02x%02x%02x', math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255))
+local function formatMoney(val)
+    if val >= 1e9 then
+        return string.format('$%.1fb/s', val / 1e9)
+    elseif val >= 1e6 then
+        return string.format('$%.1fm/s', val / 1e6)
+    elseif val >= 1e3 then
+        return string.format('$%.1fk/s', val / 1e3)
+    end
+    return string.format('$%d/s', val)
 end
 
 local function setup(opts)
@@ -53,7 +51,7 @@ local function setup(opts)
     local enabled = false
     local mostExpensiveOnly = false
     local visuals = {}
-    local conns = {}
+    local connections = {}
     local mostExpensiveTarget = nil
 
     local function cleanup(target)
@@ -80,7 +78,8 @@ local function setup(opts)
         if not stand or not stand:IsA('Model') then
             return nil
         end
-        if not stand.Parent or stand.Parent.Name ~= 'AnimalPodiums' then
+        local parent = stand.Parent
+        if not parent or parent.Name ~= 'AnimalPodiums' then
             return nil
         end
         local root = stand:FindFirstChild('Root') or stand.PrimaryPart or stand:FindFirstChildWhichIsA('BasePart', true)
@@ -88,33 +87,22 @@ local function setup(opts)
             return nil
         end
         local model = stand:FindFirstChildWhichIsA('Model') or stand:FindFirstChild('Brainrot')
-        local resolvedName = nil
+        local resolvedName = stand:GetAttribute('Brainrot') or stand.Name or 'Brainrot'
         if model then
-            resolvedName = model.Name
             local attrName = model:GetAttribute('Brainrot') or model:GetAttribute('Name')
             if attrName and attrName ~= '' then
                 resolvedName = attrName
             end
         end
-        resolvedName = resolvedName or stand:GetAttribute('Brainrot') or stand.Name or 'Brainrot'
-        local moneyAttr = stand:GetAttribute('MoneyPerSec') or model and model:GetAttribute('MoneyPerSec')
+        local moneyAttr = stand:GetAttribute('MoneyPerSec') or (model and model:GetAttribute('MoneyPerSec'))
         local moneyValue = tonumber(moneyAttr) or 0
-        local moneyText
-        if moneyValue >= 1e6 then
-            moneyText = string.format('$%.1fm/s', moneyValue / 1e6)
-        elseif moneyValue >= 1e3 then
-            moneyText = string.format('$%.1fk/s', moneyValue / 1e3)
-        else
-            moneyText = string.format('$%d/s', moneyValue)
-        end
         return {
             key = stand,
             root = root,
             model = model,
             name = resolvedName,
             moneyValue = moneyValue,
-            moneyText = moneyText,
-            isStand = true,
+            moneyText = formatMoney(moneyValue),
         }
     end
 
@@ -139,7 +127,6 @@ local function setup(opts)
             v = {
                 moneyValue = info.moneyValue or 0,
                 name = info.name or 'Brainrot',
-                isStand = info.isStand,
             }
             v.hl = Instance.new('Highlight')
             v.hl.FillColor = theme.accentA
@@ -211,8 +198,7 @@ local function setup(opts)
         v.esp.Adornee = info.root
         v.hl.Adornee = info.model or info.root or target
         v.hl.Parent = info.model or target or info.root
-        local goldHex = hex(Color3.fromRGB(255, 215, 0))
-        v.label.Text = string.format('%s\n<font color="#%s">%s</font>', toTitle(v.name), goldHex, v.moneyText or '')
+        v.label.Text = string.format('%s\n<font color="#ffd700">%s</font>', toTitle(v.name), v.moneyText or '')
     end
 
     local function rescan()
@@ -292,11 +278,11 @@ local function setup(opts)
                 updateVisibility()
             end)
         end
-        if not conns.added then
-            conns.added = Workspace.DescendantAdded:Connect(onAdded)
+        if not connections.added then
+            connections.added = Workspace.DescendantAdded:Connect(onAdded)
         end
-        if not conns.removing then
-            conns.removing = Workspace.DescendantRemoving:Connect(onRemoving)
+        if not connections.removing then
+            connections.removing = Workspace.DescendantRemoving:Connect(onRemoving)
         end
     end
 
@@ -306,12 +292,12 @@ local function setup(opts)
             renderConn:Disconnect()
             renderConn = nil
         end
-        for _, c in pairs(conns) do
+        for _, c in pairs(connections) do
             if typeof(c) == 'RBXScriptConnection' then
                 c:Disconnect()
             end
         end
-        conns = {}
+        connections = {}
         cleanupAll()
     end
 
@@ -357,12 +343,14 @@ local function setup(opts)
                         ColorSequenceKeypoint.new(1, theme.accentB),
                     })
                 end
-                if v.esp and v.esp:FindFirstChildWhichIsA('Frame') then
+                if v.esp then
                     local bg = v.esp:FindFirstChildWhichIsA('Frame')
-                    bg.BackgroundColor3 = theme.panel2
-                    local stroke = bg:FindFirstChildOfClass('UIStroke')
-                    if stroke then
-                        stroke.Color = theme.accentA
+                    if bg then
+                        bg.BackgroundColor3 = theme.panel2
+                        local stroke = bg:FindFirstChildOfClass('UIStroke')
+                        if stroke then
+                            stroke.Color = theme.accentA
+                        end
                     end
                 end
             end
@@ -373,7 +361,7 @@ end
 module.setup = setup
 
 local function autoAttach()
-    local env = nil
+    local env
     pcall(function()
         env = getgenv and getgenv()
     end)
