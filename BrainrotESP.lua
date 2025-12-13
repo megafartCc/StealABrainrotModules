@@ -87,6 +87,31 @@ local state = {
     baseChannelCache = {},
 }
 
+local function isLocalOwner(owner)
+    if not owner then
+        return false
+    end
+    if owner == LOCAL_PLAYER then
+        return true
+    end
+    if typeof(owner) == "Instance" and owner:IsA("Player") then
+        return LOCAL_PLAYER and owner == LOCAL_PLAYER
+    end
+    if typeof(owner) == "table" then
+        if owner.UserId and LOCAL_PLAYER and owner.UserId == LOCAL_PLAYER.UserId then
+            return true
+        end
+        if owner.Name and LOCAL_PLAYER and owner.Name:lower() == LOCAL_PLAYER.Name:lower() then
+            return true
+        end
+    elseif typeof(owner) == "string" then
+        return LOCAL_PLAYER and owner:lower() == LOCAL_PLAYER.Name:lower()
+    elseif typeof(owner) == "number" then
+        return LOCAL_PLAYER and LOCAL_PLAYER.UserId and owner == LOCAL_PLAYER.UserId
+    end
+    return false
+end
+
 local function destroyBeam()
     if state.beam then
         state.beam:Destroy()
@@ -597,6 +622,13 @@ local function buildStandBrainrotInfo(stand)
         return nil
     end
     local owner = channel and channel:Get("Owner")
+    if isLocalOwner(owner)
+        or isLocalOwner(base and base:GetAttribute("Owner"))
+        or isLocalOwner(base and base:GetAttribute("OwnerName"))
+        or isLocalOwner(base and base:GetAttribute("PlacedBy"))
+    then
+        return nil
+    end
     local mutation = (animalData and (animalData.Mutation or animalData.Mut))
         or readMutation(model)
         or readMutation(stand)
