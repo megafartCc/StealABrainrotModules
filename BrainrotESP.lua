@@ -95,6 +95,57 @@ local function isInsideAnimalPodiums(inst)
     return false
 end
 
+local attributeNameCandidates = {
+    "Brainrot",
+    "BrainrotName",
+    "Animal",
+    "AnimalName",
+    "Pet",
+    "Index",
+    "Name",
+    "DisplayName",
+    "InternalName",
+}
+
+local function sanitizeKey(value)
+    if value == nil then
+        return nil
+    end
+    local t = typeof(value)
+    if t == "string" then
+        local trimmed = value:gsub("^%s+", ""):gsub("%s+$", "")
+        if trimmed ~= "" then
+            return trimmed
+        end
+    elseif t == "number" then
+        return tostring(value)
+    end
+    return nil
+end
+
+local function resolveAnimalEntry(state, model)
+    if not model or not state.animalsData then
+        return nil
+    end
+
+    local entry = state.animalsData[model.Name]
+    if entry then
+        return entry, model.Name
+    end
+
+    for _, attr in ipairs(attributeNameCandidates) do
+        local key = sanitizeKey(model:GetAttribute(attr))
+        if key then
+            local lookup = state.animalsData[key]
+            if lookup then
+                return lookup, key
+            end
+        end
+    end
+
+    return nil
+end
+
 local function formatNumber(value)
     if typeof(value) ~= "number" then
         return "0"
@@ -292,28 +343,38 @@ local function ensureAnimalData(state)
     return true
 end
 
-local function isBrainrotModel(state, inst)
+local function getBrainrotEntryForModel(state, inst)
     if not inst or not inst:IsA("Model") then
-        return false
+        return nil
     end
 
     if not Workspace:IsAncestorOf(inst) then
-        return false
+        return nil
     end
 
     if not isInsideAnimalPodiums(inst) then
-        return false
+        return nil
     end
 
     if not findPlotModel(inst) then
-        return false
+        return nil
     end
 
-    return inst:FindFirstChildWhichIsA("BasePart", true) ~= nil
+    local entry, key = resolveAnimalEntry(state, inst)
+    if not entry then
+        return nil
+    end
+
+    if not inst:FindFirstChildWhichIsA("BasePart", true) then
+        return nil
+    end
+
+    return entry, key
 end
 
-local function resolveIncome(state, model)
-    local entry = state.animalsData[model.Name]
+local function resolveIncome(state, model, entryKey)
+    local activeKey = entryKey or model.Name
+    local entry = activeKey and state.animalsData[activeKey] or state.animalsData[model.Name]
     if not entry then
         return nil
     end
@@ -325,7 +386,7 @@ local function resolveIncome(state, model)
 
     local traits = parseTraitsAttribute(model:GetAttribute("Traits"))
     local ok, amount = pcall(function()
-        return state.animalsShared:GetGeneration(model.Name, mutation, traits, nil)
+        return state.animalsShared:GetGeneration(activeKey, mutation, traits, nil)
     end)
 
     if ok and typeof(amount) == "number" then
@@ -380,16 +441,17 @@ local function refreshMostExpensiveVisibility(state)
     end
 end
 
-local function updateLabel(state, model)
-    local meta = state.tracked[model]
+local function updateLabel(state, model, meta)
+    meta = meta or state.tracked[model]
     if not meta then
         return
     end
 
-    local income = resolveIncome(state, model) or 0
-    local entry = state.animalsData[model.Name]
-    local displayName = entry and entry.DisplayName or model.Name
+    local income = resolveIncome(state, model, meta.entryKey) or 0
+    local entry = meta.entry or (meta.entryKey and state.animalsData[meta.entryKey])
+    local displayName = (entry and entry.DisplayName) or model.Name
 
+    meta.entry = entry or meta.entry
     meta.income = income
     meta.nameLabel.Text = displayName
     meta.rateLabel.Text = string.format("$%s/sec", formatNumber(income))
@@ -398,7 +460,7 @@ end
 local function observeAttributes(state, model, meta)
     for _, attribute in ipairs(attributeNames) do
         table.insert(meta.connections, model:GetAttributeChangedSignal(attribute):Connect(function()
-            updateLabel(state, model)
+            updateLabel(state, model, meta)
             refreshMostExpensiveVisibility(state)
         end))
     end
@@ -438,7 +500,12 @@ local function createBrainrotEsp(state, model)
         return
     end
 
-    if state.tracked[model] or not isBrainrotModel(state, model) then
+    if state.tracked[model] then
+        return
+    end
+
+    local entry, entryKey = getBrainrotEntryForModel(state, model)
+    if not entry then
         return
     end
 
@@ -536,6 +603,8 @@ local function createBrainrotEsp(state, model)
         connections = {},
         income = 0,
         targetAttachment = targetAttachment,
+        entryKey = entryKey,
+        entry = entry,
     }
 
     state.tracked[model] = meta
@@ -555,7 +624,7 @@ local function createBrainrotEsp(state, model)
     end
 
     observeAttributes(state, model, meta)
-    updateLabel(state, model)
+    updateLabel(state, model, meta)
     refreshMostExpensiveVisibility(state)
 end
 
@@ -611,8 +680,8 @@ local function attachHeartbeat(state)
         end
         state.heartbeatAccumulator = 0
 
-        for model in pairs(state.tracked) do
-            updateLabel(state, model)
+        for model, meta in pairs(state.tracked) do
+            updateLabel(state, model, meta)
         end
         refreshMostExpensiveVisibility(state)
     end)
