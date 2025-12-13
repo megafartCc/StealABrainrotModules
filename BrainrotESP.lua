@@ -1,4 +1,3 @@
-
 local Players = game:GetService('Players')
 local ReplicatedStorage = game:GetService('ReplicatedStorage')
 local Workspace = game:GetService('Workspace')
@@ -167,7 +166,7 @@ function module.setup(opts)
         local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
         for _, visuals in pairs(activeBrainrotVisuals) do
             if visuals.hl then
-                visuals.hl.FillColor = THEME.accentA
+                -- Reworked highlight to be outline only (FillTransparency=1, OutlineTransparency=0.15)
                 visuals.hl.OutlineColor = outlineColor
             end
             if visuals.tracer then
@@ -186,9 +185,7 @@ function module.setup(opts)
                     end
                 end
             end
-            if visuals.labelStroke then
-                visuals.labelStroke.Color = THEME.accentB
-            end
+            -- Removed visuals.labelStroke update as the stroke element is now removed
         end
     end
     applyTheme(theme)
@@ -334,7 +331,7 @@ function module.setup(opts)
                     if v:IsA('StringValue') then
                         table.insert(traits, v.Value)
                     end
-                end
+                }
             end
         end
         if type(traits) == 'string' then
@@ -384,7 +381,7 @@ function module.setup(opts)
                 if TraitsData[trait] and trait == 'Sleepy' then
                     sleepy = true
                 end
-            end
+            }
         end
         local gen = baseGen * mult
         if sleepy then
@@ -809,8 +806,8 @@ function module.setup(opts)
             local outlineColor = Color3.new(THEME.accentA.R * 0.5, THEME.accentA.G * 0.5, THEME.accentA.B * 0.5)
             visuals.hl.FillColor = THEME.accentA
             visuals.hl.OutlineColor = outlineColor
-            visuals.hl.FillTransparency = 0.6
-            visuals.hl.OutlineTransparency = 0.6
+            visuals.hl.FillTransparency = 1 -- Set to 1 for outline only
+            visuals.hl.OutlineTransparency = 0.15 -- Set to 0.15 for a visible outline
             visuals.hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             visuals.hl.Adornee = info.model or info.root
             visuals.hl.Parent = info.model or info.root
@@ -838,10 +835,9 @@ function module.setup(opts)
             visuals.label.TextScaled = false
             visuals.label.TextSize = 13
             visuals.label.TextWrapped = true
-            visuals.labelStroke = Instance.new('UIStroke', visuals.label)
-            visuals.labelStroke.Thickness = 1
-            visuals.labelStroke.Color = THEME.accentB
-            visuals.labelStroke.Transparency = 0.15
+            
+            -- REMOVED visuals.labelStroke here to remove the text glow
+            
             visuals.att0 = Instance.new('Attachment', getHRP())
             visuals.att1 = Instance.new('Attachment', info.root)
             visuals.tracer = Instance.new('Beam', info.root)
@@ -1088,4 +1084,3 @@ function module.setup(opts)
 end
 
 return module
-
