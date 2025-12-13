@@ -1,5 +1,3 @@
-local module = {}
-
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -8,199 +6,88 @@ local HttpService = game:GetService("HttpService")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local datasFolder = ReplicatedStorage:WaitForChild("Datas")
+local packagesFolder = ReplicatedStorage:WaitForChild("Packages")
 
-local attributeNames = {"Traits", "Mutation"}
+local Synchronizer = require(packagesFolder:WaitForChild("Synchronizer"))
+local AnimalsDataModule = require(datasFolder:WaitForChild("Animals"))
+local AnimalsSharedModule = require(sharedFolder:WaitForChild("Animals"))
+local MutationsDataModule = require(datasFolder:WaitForChild("Mutations"))
+local TraitsDataModule = require(datasFolder:WaitForChild("Traits"))
+local GameDataModule = require(datasFolder:WaitForChild("Game"))
 
-local function defaultNotify(title, text)
-    warn(string.format("[BrainrotESP] %s - %s", tostring(title), tostring(text)))
-end
+local LOCAL_PLAYER = Players.LocalPlayer
+local module = {}
 
-local function safeRequire(instance, label)
-    if not instance then
-        return nil
-    end
-
-    local ok, result = pcall(require, instance)
+local function safeCall(fn, ...)
+    local ok, result = pcall(fn, ...)
     if ok then
         return result
     end
-
-    warn(("[BrainrotESP] Failed to require %s: %s"):format(label, tostring(result)))
     return nil
 end
 
-local function parseTraitsAttribute(value)
-    if typeof(value) ~= "string" or value == "" then
-        return nil
+local function formatNumber(value)
+    value = tonumber(value) or 0
+    if value >= 1e12 then
+        return string.format("%.1fT", value / 1e12)
+    elseif value >= 1e9 then
+        return string.format("%.1fB", value / 1e9)
+    elseif value >= 1e6 then
+        return string.format("%.1fM", value / 1e6)
+    elseif value >= 1e3 then
+        return string.format("%.0fK", value / 1e3)
     end
-
-    local firstChar = string.sub(value, 1, 1)
-    if firstChar == "[" or firstChar == "{" then
-        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, value)
-        if ok and typeof(decoded) == "table" then
-            return decoded
-        end
-    end
-
-    local traits = {}
-    for trait in string.gmatch(value, "[^,]+") do
-        local trimmed = trait:gsub("^%s+", ""):gsub("%s+$", "")
-        if trimmed ~= "" then
-            table.insert(traits, trimmed)
-        end
-    end
-
-    if #traits > 0 then
-        return traits
-    end
-
-    return nil
+    return tostring(math.floor(value))
 end
-
-local function getAdornee(inst)
-    if inst:IsA("Model") then
-        return inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
-    end
-
-    if inst:IsA("Attachment") and inst.Parent and inst.Parent:IsA("BasePart") then
-        return inst.Parent
-    end
-
-    if inst:IsA("BasePart") then
-        return inst
-    end
-
-    return nil
-end
-
-local function findPlotModel(inst)
-    local current = inst
-    while current and current ~= Workspace do
-        if current:IsA("Model") and current:FindFirstChild("AnimalPodiums") then
-            return current
-        end
-        current = current.Parent
-    end
-    return nil
-end
-
-local function isInsideAnimalPodiums(inst)
-    local current = inst and inst.Parent
-    while current and current ~= Workspace do
-        if current.Name == "AnimalPodiums" then
-            return true
-        end
-        current = current.Parent
-    end
-    return false
-end
-
-local attributeNameCandidates = {
-    "Brainrot",
-    "BrainrotName",
-    "Animal",
-    "AnimalName",
-    "Pet",
-    "Index",
-    "Name",
-    "DisplayName",
-    "InternalName",
-}
 
 local function sanitizeKey(value)
     if value == nil then
         return nil
     end
-    local t = typeof(value)
-    if t == "string" then
+    local valueType = typeof(value)
+    if valueType == "string" then
         local trimmed = value:gsub("^%s+", ""):gsub("%s+$", "")
         if trimmed ~= "" then
-            return trimmed
+            return trimmed:lower()
         end
-    elseif t == "number" then
-        return tostring(value)
+    elseif valueType == "number" then
+        return tostring(value):lower()
     end
     return nil
 end
 
-local function resolveAnimalEntry(state, model)
-    if not model or not state.animalsData then
-        return nil
+local animalsLookup = {}
+for key, entry in pairs(AnimalsDataModule) do
+    if typeof(key) == "string" then
+        animalsLookup[key:lower()] = entry
     end
-
-    local entry = state.animalsData[model.Name]
-    if entry then
-        return entry, model.Name
+    if entry.DisplayName then
+        animalsLookup[entry.DisplayName:lower()] = entry
     end
-
-    for _, attr in ipairs(attributeNameCandidates) do
-        local key = sanitizeKey(model:GetAttribute(attr))
-        if key then
-            local lookup = state.animalsData[key]
-            if lookup then
-                return lookup, key
-            end
-        end
-    end
-
-    return nil
 end
 
-local function formatNumber(value)
-    if typeof(value) ~= "number" then
-        return "0"
-    end
-
-    local suffixes = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
-    local working = value
-    local index = 1
-    while math.abs(working) >= 1000 and index < #suffixes do
-        working = working / 1000
-        index = index + 1
-    end
-
-    local absWorking = math.abs(working)
-    local pattern = "%.2f"
-    if absWorking >= 100 then
-        pattern = "%.0f"
-    elseif absWorking >= 10 then
-        pattern = "%.1f"
-    end
-
-    return pattern:format(working) .. suffixes[index]
+local mutationMultipliers = {}
+for name, data in pairs(MutationsDataModule) do
+    mutationMultipliers[name] = 1 + (data.Modifier or 0)
 end
 
-local function buildModuleState(opts)
-    opts = opts or {}
-    local section = opts.section
-    local theme = opts.theme or {}
-    local notify = opts.notify or defaultNotify
-    local player = opts.player or Players.LocalPlayer
+local state = {
+    enabled = false,
+    mostExpensiveOnly = false,
+    tracked = {},
+    lastSeen = {},
+    scanToken = 0,
+    connections = {},
+    accentColor = Color3.fromRGB(50, 130, 250),
+    frameColor = Color3.fromRGB(16, 18, 24),
+    textColor = Color3.fromRGB(230, 235, 240),
+    notify = function(msg)
+        warn("[BrainrotESP] " .. tostring(msg))
+    end,
+    baseChannelCache = {},
+}
 
-    local accentColor = theme.accent or Color3.fromRGB(50, 130, 250)
-    local frameColor = theme.panel2 or Color3.fromRGB(16, 18, 24)
-    local textColor = theme.text or Color3.fromRGB(230, 235, 240)
-    local rateColor = textColor
-
-    local state = {
-        section = section,
-        notify = notify,
-        accentColor = accentColor,
-        frameColor = frameColor,
-        textColor = textColor,
-        rateColor = rateColor,
-        enabled = false,
-        mostExpensiveOnly = false,
-        tracked = {},
-        heartbeatAccumulator = 0,
-        observers = {},
-        player = player,
-    }
-
-    return state
-end
-
-local function destroyBeam(state)
+local function destroyBeam()
     if state.beam then
         state.beam:Destroy()
         state.beam = nil
@@ -211,189 +98,543 @@ local function destroyBeam(state)
     end
 end
 
-local function updatePlayerAttachment(state)
+local function applyOptions(opts)
+    opts = opts or {}
+    local theme = opts.theme or {}
+    if theme.accent then
+        state.accentColor = theme.accent
+    end
+    if theme.accentA then
+        state.accentColor = theme.accentA
+    end
+    if theme.panel2 then
+        state.frameColor = theme.panel2
+    end
+    if theme.text then
+        state.textColor = theme.text
+    end
+    if typeof(opts.notify) == "function" then
+        state.notify = opts.notify
+    end
+end
+
+local function updatePlayerAttachment()
     if state.beamAttachment0 then
         state.beamAttachment0:Destroy()
         state.beamAttachment0 = nil
     end
-    if state.hrp then
+    local character = LOCAL_PLAYER and LOCAL_PLAYER.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if hrp then
         local attachment = Instance.new("Attachment")
-        attachment.Name = "BrainrotESPPlayerAttachment"
-        attachment.Parent = state.hrp
+        attachment.Name = "BrainrotESPPivot"
+        attachment.Parent = hrp
         state.beamAttachment0 = attachment
     end
-    if state.beam then
+    if state.beam and state.beamAttachment0 then
         state.beam.Attachment0 = state.beamAttachment0
     end
 end
 
-local function ensureBeam(state)
+if LOCAL_PLAYER then
+    LOCAL_PLAYER.CharacterAdded:Connect(function()
+        task.wait(0.25)
+        updatePlayerAttachment()
+    end)
+    LOCAL_PLAYER.CharacterRemoving:Connect(function()
+        updatePlayerAttachment()
+    end)
+end
+
+local function ensureBeam()
     if state.beam then
         return
     end
-    local beam = Instance.new("Beam")
-    beam.Name = "BrainrotESPBeam"
-    beam.Color = ColorSequence.new(state.accentColor)
-    beam.Width0 = 0.1
-    beam.Width1 = 0.1
-    beam.LightEmission = 0.4
-    beam.FaceCamera = true
-    beam.Transparency = NumberSequence.new(0.1)
-    beam.Enabled = false
-    beam.Parent = Workspace
-    state.beam = beam
-    updatePlayerAttachment(state)
+    state.beam = Instance.new("Beam")
+    state.beam.Name = "BrainrotESPLaser"
+    state.beam.Width0 = 0.1
+    state.beam.Width1 = 0.1
+    state.beam.LightEmission = 0.4
+    state.beam.Color = ColorSequence.new(state.accentColor)
+    state.beam.Transparency = NumberSequence.new(0.1)
+    state.beam.FaceCamera = true
+    state.beam.Enabled = false
+    state.beam.Parent = Workspace
+    updatePlayerAttachment()
 end
 
-local function setBeamTarget(state, meta)
-    state.bestMeta = meta
+local function setBeamTarget(meta)
     if not state.mostExpensiveOnly or not state.enabled then
         if state.beam then
             state.beam.Enabled = false
         end
         return
     end
-
-    ensureBeam(state)
-    updatePlayerAttachment(state)
-
+    ensureBeam()
+    updatePlayerAttachment()
     if state.beam and state.beamAttachment0 and meta and meta.targetAttachment then
         state.beam.Attachment0 = state.beamAttachment0
         state.beam.Attachment1 = meta.targetAttachment
         state.beam.Enabled = true
-    else
-        if state.beam then
-            state.beam.Enabled = false
+    elseif state.beam then
+        state.beam.Enabled = false
+    end
+end
+
+local function getPlotsFolder()
+    return Workspace:FindFirstChild("Plots")
+end
+
+local function getStandBase(stand)
+    if not stand or not stand.Parent then
+        return nil
+    end
+    if stand.Parent.Name == "AnimalPodiums" then
+        return stand.Parent.Parent
+    end
+    return stand:FindFirstAncestorOfClass("Model")
+end
+
+local function getValidStandBase(stand)
+    local plots = getPlotsFolder()
+    local base = getStandBase(stand)
+    if not base then
+        return nil
+    end
+    if plots then
+        if not base:IsDescendantOf(plots) then
+            return nil
+        end
+        if not base:FindFirstChild("PlotSign") then
+            return nil
+        end
+        return base
+    end
+    -- Fallback: if Plots folder is missing (e.g. renamed), still accept the base
+    -- as long as it looks like a podium parent.
+    if base:FindFirstChild("AnimalPodiums") then
+        return base
+    end
+    return nil
+end
+
+local function findBrainrotModelOnStand(stand)
+    if not stand or not stand.Parent then
+        return nil
+    end
+    for _, desc in ipairs(stand:GetDescendants()) do
+        if desc:IsA("Model") then
+            local root = desc:FindFirstChild("RootPart")
+                or desc:FindFirstChild("HumanoidRootPart")
+                or desc.PrimaryPart
+            if root then
+                local lookup = sanitizeKey(desc.Name)
+                local idxAttr = sanitizeKey(desc:GetAttribute("Index") or desc:GetAttribute("Animal") or desc:GetAttribute("Brainrot"))
+                local hasIncome = desc:FindFirstChild("Income")
+                    or desc:FindFirstChild("Generation")
+                    or desc:GetAttribute("IncomePerSecond")
+                if (lookup and animalsLookup[lookup])
+                    or (idxAttr and animalsLookup[idxAttr])
+                    or hasIncome
+                    or desc:GetAttribute("Mutation")
+                    or desc:GetAttribute("Traits")
+                then
+                    return desc, root
+                end
+            end
         end
     end
+    return nil
 end
 
-local function setCharacter(state, character)
-    if state.charChildAdded then
-        state.charChildAdded:Disconnect()
-        state.charChildAdded = nil
+local function findBrainrotModelInBase(base, nameList)
+    if not base then
+        return nil, nil
     end
-    if state.charRemovingConn then
-        state.charRemovingConn:Disconnect()
-        state.charRemovingConn = nil
+    local wanted = {}
+    for _, n in ipairs(nameList or {}) do
+        local key = sanitizeKey(n)
+        if key and key ~= "" then
+            wanted[key] = true
+        end
     end
-
-    state.character = character
-    state.hrp = character and character:FindFirstChild("HumanoidRootPart") or nil
-    updatePlayerAttachment(state)
-
-    if character then
-        state.charChildAdded = character.ChildAdded:Connect(function(child)
-            if child.Name == "HumanoidRootPart" then
-                state.hrp = child
-                updatePlayerAttachment(state)
-                setBeamTarget(state, state.bestMeta)
+    for _, desc in ipairs(base:GetDescendants()) do
+        if desc:IsA("Model") and desc.Parent ~= base:FindFirstChild("AnimalPodiums") then
+            local root = desc.PrimaryPart
+                or desc:FindFirstChild("RootPart")
+                or desc:FindFirstChild("HumanoidRootPart")
+                or desc:FindFirstChildWhichIsA("BasePart", true)
+            if root then
+                local key = sanitizeKey(desc.Name)
+                if not next(wanted) or (key and wanted[key]) then
+                    return desc, root
+                end
             end
-        end)
-        state.charRemovingConn = character.ChildRemoved:Connect(function(child)
-            if child == state.hrp then
-                state.hrp = nil
-                updatePlayerAttachment(state)
-                setBeamTarget(state, state.bestMeta)
+        end
+    end
+    return nil, nil
+end
+
+local function getStandRootPart(stand)
+    local model, root = findBrainrotModelOnStand(stand)
+    if model then
+        root = root or model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+        if root then
+            return model, root
+        end
+    end
+    local base = stand and stand:FindFirstChild("Base")
+    if base then
+        local spawn = base:FindFirstChild("Spawn")
+        if spawn and spawn:IsA("BasePart") then
+            return nil, spawn
+        end
+    end
+    return nil, stand and (stand.PrimaryPart or stand:FindFirstChildWhichIsA("BasePart", true))
+end
+
+local function getAttrNumber(container, keys)
+    for _, key in ipairs(keys) do
+        local val = container:GetAttribute(key)
+        if val then
+            local num = tonumber(val)
+            if num then
+                return num
             end
+        end
+        local child = container:FindFirstChild(key)
+        if child and child.Value then
+            local num = tonumber(child.Value)
+            if num then
+                return num
+            end
+        end
+    end
+    return nil
+end
+
+local function readMutation(container)
+    if not container then
+        return nil
+    end
+    local val = container:GetAttribute("Mutation") or container:GetAttribute("Mut")
+    if val ~= nil then
+        return val
+    end
+    local child = container:FindFirstChild("Mutation") or container:FindFirstChild("Mut")
+    if child and child.Value ~= nil then
+        return child.Value
+    end
+    return nil
+end
+
+local normalizeTraits
+
+local function readTraits(container)
+    if not container then
+        return nil
+    end
+    local traits = normalizeTraits(container:GetAttribute("Traits"))
+    if traits then
+        return traits
+    end
+    local collected = {}
+    for i = 1, 4 do
+        local key = "Trait" .. i
+        local val = container:GetAttribute(key)
+        if val then
+            table.insert(collected, val)
+        else
+            local child = container:FindFirstChild(key)
+            if child and child.Value then
+                table.insert(collected, child.Value)
+            end
+        end
+    end
+    if #collected > 0 then
+        return collected
+    end
+    return nil
+end
+
+local function safePlayerMultiplier(owner)
+    local okGame, gameShared = pcall(function()
+        return require(sharedFolder:WaitForChild("Game"))
+    end)
+    if not okGame or not gameShared or type(gameShared.GetPlayerCashMultiplayer) ~= "function" then
+        return 1
+    end
+    local okMult, mult = pcall(gameShared.GetPlayerCashMultiplayer, gameShared, owner)
+    if okMult and mult then
+        local num = tonumber(mult)
+        if num then
+            return num
+        end
+    end
+    return 1
+end
+
+local function getMutationAndTraitsFromModel(model)
+    if not model then
+        return nil, nil
+    end
+    local mutation = readMutation(model)
+    local traits = readTraits(model)
+    if not mutation then
+        local folder = model:FindFirstChild("MutationFolder") or model:FindFirstChild("Mutations")
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                if child:IsA("StringValue") and child.Value ~= "" then
+                    mutation = child.Value
+                    break
+                end
+            end
+        end
+    end
+    if not traits then
+        local tFolder = model:FindFirstChild("Traits") or model:FindFirstChild("TraitsFolder")
+        if tFolder then
+            local list = {}
+            for _, child in ipairs(tFolder:GetChildren()) do
+                if child:IsA("StringValue") and child.Value ~= "" then
+                    table.insert(list, child.Value)
+                end
+            end
+            if #list > 0 then
+                traits = list
+            end
+        end
+    end
+    if type(traits) == "string" then
+        traits = { traits }
+    end
+    return mutation, normalizeTraits(traits)
+end
+
+local function calculateMultiplier(mutation, traits)
+    local multipliers = {}
+    local count = 0
+    if mutation and mutationMultipliers[mutation] then
+        table.insert(multipliers, mutationMultipliers[mutation])
+        count = count + 1
+    else
+        table.insert(multipliers, 1)
+        count = count + 1
+    end
+    if typeof(traits) == "table" then
+        for _, trait in ipairs(traits) do
+            local info = TraitsDataModule[trait]
+            if info then
+                table.insert(multipliers, 1 + (info.MultiplierModifier or 0))
+                count = count + 1
+            end
+        end
+    end
+    if count == 0 then
+        return 1
+    end
+    local sum = 0
+    for _, mult in ipairs(multipliers) do
+        sum = sum + mult
+    end
+    local total = sum - (count - 1)
+    return total < 1 and 1 or total
+end
+
+local function computeGeneration(index, mutation, traits, owner)
+    local entry = index and animalsLookup[sanitizeKey(index) or ""]
+    if not entry then
+        return 0
+    end
+    local baseGen = entry.Generation
+        or ((entry.Price or 0) * (GameDataModule.Game and GameDataModule.Game.AnimalGanerationModifier or 0))
+    local mult = calculateMultiplier(mutation, traits)
+    local sleepy = false
+    if typeof(traits) == "table" then
+        for _, trait in ipairs(traits) do
+            if trait == "Sleepy" then
+                sleepy = true
+                break
+            end
+        end
+    end
+    local gen = baseGen * mult
+    if sleepy then
+        gen = gen * 0.5
+    end
+    if owner then
+        gen = gen * safePlayerMultiplier(owner)
+    end
+    return math.max(0, math.floor(gen + 0.5))
+end
+
+local function computeIncome(index, mutation, traits, owner, stand, model, entry, animalData)
+    entry = entry or (index and animalsLookup[sanitizeKey(index) or ""])
+    local income = nil
+
+    if owner and typeof(owner) == "table" and owner.UserId and Players then
+        owner = Players:GetPlayerByUserId(owner.UserId) or owner
+    elseif owner and typeof(owner) == "table" and owner.Name and Players then
+        owner = Players:FindFirstChild(owner.Name) or owner
+    end
+
+    local modelMutation, modelTraits = getMutationAndTraitsFromModel(model)
+    mutation = mutation or modelMutation
+    traits = traits or modelTraits or readTraits(stand)
+
+    income = income or (model and getAttrNumber(model, { "IncomePerSecond", "Income", "Generation", "Gen" }))
+    income = income or (stand and getAttrNumber(stand, { "IncomePerSecond", "Income", "Generation", "Gen" }))
+    income = income or (animalData and tonumber(animalData.Generation))
+
+    if (not income or income == 0) and AnimalsSharedModule and AnimalsSharedModule.GetGeneration and index then
+        income = safeCall(AnimalsSharedModule.GetGeneration, AnimalsSharedModule, index, mutation, traits, owner)
+    end
+
+    if (not income or income == 0) and index then
+        income = computeGeneration(index, mutation, traits, owner)
+    end
+
+    if (not income or income == 0) and entry and entry.Generation then
+        income = entry.Generation
+    end
+
+    return income or 0
+end
+
+local function getStandSlot(stand)
+    if not stand then
+        return nil
+    end
+    local numeric = tonumber(stand.Name)
+    if numeric then
+        return numeric
+    end
+    local attr = stand:GetAttribute("Slot") or stand:GetAttribute("Index")
+    return tonumber(attr)
+end
+
+local function resolveBrainrotName(stand, model, index)
+    if index then
+        local key = sanitizeKey(index)
+        local entry = key and animalsLookup[key]
+        if entry then
+            return entry.DisplayName or index
+        end
+        return typeof(index) == "string" and index or tostring(index)
+    end
+    if stand then
+        local attr = stand:GetAttribute("Animal") or stand:GetAttribute("Brainrot") or stand:GetAttribute("Pet")
+        if attr and attr ~= "" then
+            return attr
+        end
+    end
+    if model then
+        return model.Name
+    end
+    return "Brainrot"
+end
+
+local function getBaseChannel(base)
+    if not base then
+        return nil
+    end
+    if state.baseChannelCache[base] then
+        return state.baseChannelCache[base]
+    end
+    local channel = nil
+    if Synchronizer and (Synchronizer.Get or Synchronizer.Wait) then
+        channel = safeCall(function()
+            return (Synchronizer.Get and Synchronizer:Get(base.Name)) or nil
+        end) or safeCall(function()
+            return Synchronizer:Wait(base.Name)
         end)
     end
-
-    setBeamTarget(state, state.bestMeta)
+    state.baseChannelCache[base] = channel
+    return channel
 end
 
-local function bindPlayer(state)
-    local player = state.player
-    if not player then
-        return
+function normalizeTraits(traits)
+    if typeof(traits) == "table" then
+        if traits[1] then
+            return traits
+        end
+        local list = {}
+        for _, value in pairs(traits) do
+            table.insert(list, value)
+        end
+        return list
     end
-
-    if state.charAddedConn then
-        state.charAddedConn:Disconnect()
+    if typeof(traits) == "string" and traits ~= "" then
+        local parsed = safeCall(function()
+            return HttpService:JSONDecode(traits)
+        end)
+        if typeof(parsed) == "table" then
+            return normalizeTraits(parsed)
+        end
+        return { traits }
     end
-    if state.charRemovingPlayerConn then
-        state.charRemovingPlayerConn:Disconnect()
-    end
-
-    state.charAddedConn = player.CharacterAdded:Connect(function(char)
-        setCharacter(state, char)
-    end)
-    state.charRemovingPlayerConn = player.CharacterRemoving:Connect(function()
-        setCharacter(state, nil)
-    end)
-
-    if player.Character then
-        setCharacter(state, player.Character)
-    end
+    return nil
 end
 
-local function ensureAnimalData(state)
-    if state.animalsShared and state.animalsData then
-        return true
-    end
-
-    state.animalsShared = safeRequire(sharedFolder:FindFirstChild("Animals"), "Shared.Animals")
-    state.animalsData = safeRequire(datasFolder:FindFirstChild("Animals"), "Datas.Animals")
-
-    if not state.animalsShared or not state.animalsData then
-        state.notify("Brainrot ESP", "Unable to load animal metadata. ESP disabled.")
-        return false
-    end
-
-    return true
-end
-
-local function getBrainrotEntryForModel(state, inst)
-    if not inst or not inst:IsA("Model") then
+local function buildStandBrainrotInfo(stand)
+    if not stand or not stand.Parent then
         return nil
     end
-
-    if not Workspace:IsAncestorOf(inst) then
+    local base = getValidStandBase(stand)
+    if not base then
         return nil
     end
-
-    if not isInsideAnimalPodiums(inst) then
+    local channel = getBaseChannel(base)
+    local slot = getStandSlot(stand)
+    local animals
+    local animalData
+    if channel and type(channel.Get) == "function" then
+        animals = channel:Get("AnimalList") or channel:Get("AnimalPodiums")
+        animalData = animals and animals[slot]
+    end
+    local model, root = getStandRootPart(stand)
+    if not root then
         return nil
     end
-
-    if not findPlotModel(inst) then
+    local owner = channel and channel:Get("Owner")
+    local mutation = (animalData and (animalData.Mutation or animalData.Mut))
+        or readMutation(model)
+        or readMutation(stand)
+    local traits = normalizeTraits(animalData and animalData.Traits)
+        or readTraits(model)
+        or readTraits(stand)
+    local index = animalData and (animalData.Index or animalData.Animal or animalData.Name)
+        or (stand:GetAttribute("Animal") or stand:GetAttribute("Brainrot"))
+        or (model and model:GetAttribute("Animal"))
+        or (model and model.Name)
+        or stand.Name
+    local resolvedName = resolveBrainrotName(stand, model, index)
+    if not model then
+        local names = {
+            resolvedName,
+            index,
+            entry and entry.DisplayName,
+        }
+        model, root = findBrainrotModelInBase(base, names)
+        if model and root then
+            -- refresh resolved name if we found a better match
+            resolvedName = resolveBrainrotName(stand, model, index)
+        end
+    end
+    local key = sanitizeKey(index) or sanitizeKey(resolvedName)
+    local entry = key and animalsLookup[key]
+    local moneyValue = computeIncome(index, mutation, traits, owner, stand, model, entry, animalData)
+    if not model and moneyValue <= 0 then
         return nil
     end
-
-    local entry, key = resolveAnimalEntry(state, inst)
-    if not entry then
-        return nil
-    end
-
-    if not inst:FindFirstChildWhichIsA("BasePart", true) then
-        return nil
-    end
-
-    return entry, key
-end
-
-local function resolveIncome(state, model, entryKey)
-    local activeKey = entryKey or model.Name
-    local entry = activeKey and state.animalsData[activeKey] or state.animalsData[model.Name]
-    if not entry then
-        return nil
-    end
-
-    local mutation = model:GetAttribute("Mutation")
-    if mutation == "" then
-        mutation = nil
-    end
-
-    local traits = parseTraitsAttribute(model:GetAttribute("Traits"))
-    local ok, amount = pcall(function()
-        return state.animalsShared:GetGeneration(activeKey, mutation, traits, nil)
-    end)
-
-    if ok and typeof(amount) == "number" then
-        return amount
-    end
-
-    return entry.Generation
+    return {
+        stand = stand,
+        base = base,
+        model = model,
+        root = root,
+        name = resolvedName,
+        moneyValue = moneyValue,
+    }
 end
 
 local function setVisualVisibility(meta, visible)
@@ -408,122 +649,78 @@ local function setVisualVisibility(meta, visible)
     end
 end
 
-local function refreshMostExpensiveVisibility(state)
-    local tracked = state.tracked
-
+local function refreshMostExpensiveVisibility()
     if not state.mostExpensiveOnly then
-        for _, meta in pairs(tracked) do
+        for _, meta in pairs(state.tracked) do
             setVisualVisibility(meta, state.enabled)
         end
-        setBeamTarget(state, nil)
+        setBeamTarget(nil)
         return
     end
-
+    local bestMeta
     local bestIncome = -math.huge
-    local bestMeta = nil
-    for _, meta in pairs(tracked) do
+    for _, meta in pairs(state.tracked) do
         local income = meta.income or 0
         if income > bestIncome then
             bestIncome = income
             bestMeta = meta
         end
     end
-
-    for _, meta in pairs(tracked) do
-        local visible = bestIncome ~= -math.huge and (meta.income or 0) >= bestIncome - 1e-6
-        setVisualVisibility(meta, visible)
+    for _, meta in pairs(state.tracked) do
+        local visible = bestMeta and meta == bestMeta
+        setVisualVisibility(meta, visible and state.enabled)
     end
-
-    if bestIncome == -math.huge then
-        setBeamTarget(state, nil)
-    else
-        setBeamTarget(state, bestMeta)
-    end
+    setBeamTarget(bestMeta)
 end
 
-local function updateLabel(state, model, meta)
-    meta = meta or state.tracked[model]
+local function cleanupStand(stand)
+    local meta = state.tracked[stand]
     if not meta then
         return
     end
-
-    local income = resolveIncome(state, model, meta.entryKey) or 0
-    local entry = meta.entry or (meta.entryKey and state.animalsData[meta.entryKey])
-    local displayName = (entry and entry.DisplayName) or model.Name
-
-    meta.entry = entry or meta.entry
-    meta.income = income
-    meta.nameLabel.Text = displayName
-    meta.rateLabel.Text = string.format("$%s/sec", formatNumber(income))
-end
-
-local function observeAttributes(state, model, meta)
-    for _, attribute in ipairs(attributeNames) do
-        table.insert(meta.connections, model:GetAttributeChangedSignal(attribute):Connect(function()
-            updateLabel(state, model, meta)
-            refreshMostExpensiveVisibility(state)
-        end))
-    end
-end
-
-local function cleanupBrainrot(state, model)
-    local meta = state.tracked[model]
-    if not meta then
-        return
-    end
-
-    for _, connection in ipairs(meta.connections) do
-        connection:Disconnect()
-    end
-
-    if meta.billboard then
-        meta.billboard:Destroy()
-    end
-
     if meta.highlight then
         meta.highlight:Destroy()
     end
-
+    if meta.billboard then
+        meta.billboard:Destroy()
+    end
     if meta.targetAttachment then
         meta.targetAttachment:Destroy()
     end
-
-    if state.bestMeta == meta then
-        setBeamTarget(state, nil)
-    end
-
-    state.tracked[model] = nil
+    state.tracked[stand] = nil
 end
 
-local function createBrainrotEsp(state, model)
-    if not state.enabled then
-        return
+local function applyStandInfo(meta, info)
+    meta.income = info.moneyValue or 0
+    meta.nameLabel.Text = info.name or "Brainrot"
+    meta.rateLabel.Text = string.format("$%s/sec", formatNumber(meta.income))
+    local adornee = info.root
+    if adornee and adornee ~= meta.currentAdornee then
+        meta.currentAdornee = adornee
+        meta.billboard.Adornee = adornee
+        meta.billboard.Parent = adornee
+        meta.targetAttachment.Parent = adornee
     end
-
-    if state.tracked[model] then
-        return
+    local highlightTarget = info.model or adornee
+    if highlightTarget then
+        meta.highlight.Adornee = highlightTarget
+        meta.highlight.Parent = highlightTarget
     end
+end
 
-    local entry, entryKey = getBrainrotEntryForModel(state, model)
-    if not entry then
-        return
-    end
-
-    local adornee = getAdornee(model)
-    if not adornee then
-        return
-    end
-
+local function createStandVisual(info)
+    local adornee = info.root
     local highlight = Instance.new("Highlight")
     highlight.Name = "BrainrotESPHighlight"
-    highlight.Adornee = model
     highlight.FillColor = state.accentColor
-    highlight.FillTransparency = 0.25
-    highlight.OutlineColor = Color3.new(state.accentColor.R * 0.5, state.accentColor.G * 0.5, state.accentColor.B * 0.5)
-    highlight.OutlineTransparency = 0
+    highlight.FillTransparency = 0.12
+    highlight.OutlineColor = Color3.new(state.accentColor.R * 0.45, state.accentColor.G * 0.45, state.accentColor.B * 0.45)
+    highlight.OutlineTransparency = 0.25
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled = true
-    highlight.Parent = model
+    -- Prefer to adorn and parent the actual brainrot model so the whole model is filled blue.
+    highlight.Adornee = info.model or adornee
+    highlight.Parent = info.model or adornee or info.stand
 
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "BrainrotESPBillboard"
@@ -534,15 +731,13 @@ local function createBrainrotEsp(state, model)
     billboard.LightInfluence = 0
     billboard.Enabled = true
     billboard.Adornee = adornee
-    billboard.Parent = model
+    billboard.Parent = adornee
 
     local frame = Instance.new("Frame")
-    frame.Name = "BrainrotESPFrame"
     frame.BackgroundColor3 = state.frameColor
     frame.BackgroundTransparency = 0.45
     frame.BorderSizePixel = 0
     frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.Visible = true
     frame.Parent = billboard
 
     local corner = Instance.new("UICorner")
@@ -557,7 +752,6 @@ local function createBrainrotEsp(state, model)
     stroke.Parent = frame
 
     local nameLabel = Instance.new("TextLabel")
-    nameLabel.Name = "BrainrotESPName"
     nameLabel.BackgroundTransparency = 1
     nameLabel.Size = UDim2.new(1, -8, 0, 18)
     nameLabel.Position = UDim2.new(0, 4, 0, 3)
@@ -570,11 +764,9 @@ local function createBrainrotEsp(state, model)
     nameLabel.TextXAlignment = Enum.TextXAlignment.Center
     nameLabel.TextYAlignment = Enum.TextYAlignment.Top
     nameLabel.TextWrapped = true
-    nameLabel.ClipsDescendants = true
     nameLabel.Parent = frame
 
     local rateLabel = Instance.new("TextLabel")
-    rateLabel.Name = "BrainrotESPRate"
     rateLabel.BackgroundTransparency = 1
     rateLabel.Size = UDim2.new(1, -8, 0, 14)
     rateLabel.Position = UDim2.new(0, 4, 0, 20)
@@ -587,184 +779,232 @@ local function createBrainrotEsp(state, model)
     rateLabel.TextXAlignment = Enum.TextXAlignment.Center
     rateLabel.TextYAlignment = Enum.TextYAlignment.Top
     rateLabel.TextWrapped = true
-    rateLabel.ClipsDescendants = true
     rateLabel.Parent = frame
 
-    local targetAttachment = Instance.new("Attachment")
-    targetAttachment.Name = "BrainrotESPTarget"
-    targetAttachment.Parent = adornee
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "BrainrotESPTarget"
+    attachment.Parent = adornee
 
-    local meta = {
+    return {
         highlight = highlight,
         billboard = billboard,
         frame = frame,
         nameLabel = nameLabel,
         rateLabel = rateLabel,
-        connections = {},
-        income = 0,
-        targetAttachment = targetAttachment,
-        entryKey = entryKey,
-        entry = entry,
+        targetAttachment = attachment,
+        currentAdornee = adornee,
+        stand = info.stand,
     }
-
-    state.tracked[model] = meta
-
-    table.insert(meta.connections, model.AncestryChanged:Connect(function(_, parent)
-        if not parent then
-            cleanupBrainrot(state, model)
-            refreshMostExpensiveVisibility(state)
-        end
-    end))
-
-    if model.Destroying then
-        table.insert(meta.connections, model.Destroying:Connect(function()
-            cleanupBrainrot(state, model)
-            refreshMostExpensiveVisibility(state)
-        end))
-    end
-
-    observeAttributes(state, model, meta)
-    updateLabel(state, model, meta)
-    refreshMostExpensiveVisibility(state)
 end
 
-local function connectObservers(state)
-    if state.observers.descendantAdded then
-        return
-    end
-
-    state.observers.descendantAdded = Workspace.DescendantAdded:Connect(function(inst)
-        if inst:IsA("Model") then
-            createBrainrotEsp(state, inst)
-        end
-    end)
-end
-
-local function disconnectObservers(state)
-    if state.observers.descendantAdded then
-        state.observers.descendantAdded:Disconnect()
-        state.observers.descendantAdded = nil
-    end
-
-    if state.observers.heartbeat then
-        state.observers.heartbeat:Disconnect()
-        state.observers.heartbeat = nil
-    end
-end
-
-local function cleanupAll(state)
-    for model in pairs(state.tracked) do
-        cleanupBrainrot(state, model)
-    end
-    state.tracked = {}
-end
-
-local function scanWorkspace(state)
-    for _, descendant in ipairs(Workspace:GetDescendants()) do
-        if descendant:IsA("Model") then
-            createBrainrotEsp(state, descendant)
-        end
-    end
-end
-
-local function attachHeartbeat(state)
-    if state.observers.heartbeat then
-        return
-    end
-
-    state.heartbeatAccumulator = 0
-    state.observers.heartbeat = RunService.Heartbeat:Connect(function(delta)
-        state.heartbeatAccumulator = state.heartbeatAccumulator + delta
-        if state.heartbeatAccumulator < 1 then
-            return
-        end
-        state.heartbeatAccumulator = 0
-
-        for model, meta in pairs(state.tracked) do
-            updateLabel(state, model, meta)
-        end
-        refreshMostExpensiveVisibility(state)
-    end)
-end
-
-local function startEsp(state)
-    if state.enabled then
-        return
-    end
-
-    if not ensureAnimalData(state) then
-        return
-    end
-
-    state.enabled = true
-    connectObservers(state)
-    attachHeartbeat(state)
-    scanWorkspace(state)
-    refreshMostExpensiveVisibility(state)
-end
-
-local function stopEsp(state)
+local function updateStandEsp(stand)
     if not state.enabled then
         return
     end
-
-    state.enabled = false
-    disconnectObservers(state)
-    cleanupAll(state)
-    destroyBeam(state)
+    local info = safeCall(buildStandBrainrotInfo, stand)
+    if not info then
+        cleanupStand(stand)
+        return
+    end
+    local meta = state.tracked[stand]
+    if not meta then
+        meta = createStandVisual(info)
+        state.tracked[stand] = meta
+    end
+    applyStandInfo(meta, info)
+    state.lastSeen[stand] = state.scanToken
 end
 
-local function setupToggles(state, controls)
-    local section = state.section
+local function scanAllStands()
+    state.scanToken = state.scanToken + 1
+    local plots = getPlotsFolder()
+    if plots then
+        for _, base in ipairs(plots:GetChildren()) do
+            local podiums = base:FindFirstChild("AnimalPodiums")
+            if podiums then
+                for _, stand in ipairs(podiums:GetChildren()) do
+                    updateStandEsp(stand)
+                end
+            end
+        end
+    else
+        for _, podiums in ipairs(Workspace:GetDescendants()) do
+            if podiums.Name == "AnimalPodiums" then
+                for _, stand in ipairs(podiums:GetChildren()) do
+                    updateStandEsp(stand)
+                end
+            end
+        end
+    end
+    for stand, meta in pairs(state.tracked) do
+        if state.lastSeen[stand] ~= state.scanToken then
+            cleanupStand(stand)
+        end
+    end
+    refreshMostExpensiveVisibility()
+end
+
+local function heartbeatStep(dt)
+    state.accumulator = (state.accumulator or 0) + dt
+    if state.accumulator < 1 then
+        return
+    end
+    state.accumulator = 0
+    scanAllStands()
+end
+
+local function startEsp()
+    if state.enabled then
+        return
+    end
+    state.enabled = true
+    scanAllStands()
+    state.connections.heartbeat = RunService.Heartbeat:Connect(heartbeatStep)
+    state.connections.descAdded = Workspace.DescendantAdded:Connect(function(inst)
+        if state.enabled and inst:IsA("Model") and inst.Parent and inst.Parent.Name == "AnimalPodiums" then
+            updateStandEsp(inst)
+        end
+    end)
+    state.connections.descRemoving = Workspace.DescendantRemoving:Connect(function(inst)
+        if inst:IsA("Model") and state.tracked[inst] then
+            cleanupStand(inst)
+        end
+    end)
+    state.notify("Brainrot ESP enabled")
+end
+
+local function stopEsp()
+    if not state.enabled then
+        return
+    end
+    state.enabled = false
+    for _, conn in pairs(state.connections) do
+        safeCall(function()
+            conn:Disconnect()
+        end)
+    end
+    state.connections = {}
+    for stand in pairs(state.tracked) do
+        cleanupStand(stand)
+    end
+    destroyBeam()
+    state.notify("Brainrot ESP disabled")
+end
+
+local function setMostExpensive(value)
+    state.mostExpensiveOnly = value and true or false
+    refreshMostExpensiveVisibility()
+end
+
+local function attachUi(section)
     if not section or type(section.CreateToggle) ~= "function" then
         return
     end
-
-    local brainrotToggle = section:CreateToggle({
+    local espToggle = section:CreateToggle({
         Title = "Brainrot ESP",
         Default = false,
         SaveKey = "brainrot_esp_enabled",
         Callback = function(enabled)
             if enabled then
-                startEsp(state)
+                startEsp()
             else
-                stopEsp(state)
+                stopEsp()
             end
         end,
     })
-
     local expensiveToggle = section:CreateToggle({
         Title = "Most Expensive Only",
         Default = false,
         SaveKey = "brainrot_esp_most_expensive",
-        Callback = function(onlyBest)
-            state.mostExpensiveOnly = onlyBest and true or false
-            refreshMostExpensiveVisibility(state)
+        Callback = function(val)
+            setMostExpensive(val)
         end,
     })
+    return espToggle, expensiveToggle
+end
 
-    controls.brainrotToggle = brainrotToggle
-    controls.mostExpensiveToggle = expensiveToggle
+local function resolveSection()
+    local env = nil
+    pcall(function()
+        env = getgenv and getgenv()
+    end)
+    if not env then
+        return nil, nil, nil
+    end
+    local section = env.BrainrotESPSection
+        or (env.sections and env.sections.esp)
+        or env.ESPSection
+    local theme = env.theme or (env.Library and env.Library.Theme) or {}
+    local notify
+    if typeof(env.notify) == "function" then
+        notify = function(msg)
+            env.notify("Brainrot ESP", msg)
+        end
+    elseif env.Library and typeof(env.Library.Notify) == "function" then
+        notify = function(msg)
+            env.Library:Notify({ Title = "Brainrot ESP", Text = msg, Duration = 3 })
+        end
+    end
+    return section, theme, notify
 end
 
 function module.setup(opts)
-    local state = buildModuleState(opts)
-    bindPlayer(state)
-    local controls = {
-        start = function()
-            startEsp(state)
-        end,
-        stop = function()
-            stopEsp(state)
-        end,
-        setMostExpensiveOnly = function(value)
-            state.mostExpensiveOnly = not not value
-            refreshMostExpensiveVisibility(state)
-        end,
+    opts = opts or {}
+    applyOptions(opts)
+    local section = opts.section
+    if not section then
+        local resolvedSection, theme, notify = resolveSection()
+        opts.theme = opts.theme or theme
+        if notify then
+            opts.notify = opts.notify or notify
+        end
+        applyOptions(opts)
+        section = resolvedSection
+    end
+    local mainToggle, expensiveToggle = attachUi(section)
+    if not mainToggle then
+        startEsp()
+    else
+        if mainToggle.GetState and mainToggle:GetState() then
+            startEsp()
+        end
+        if expensiveToggle and expensiveToggle.GetState then
+            setMostExpensive(expensiveToggle:GetState())
+        end
+    end
+    return {
+        start = startEsp,
+        stop = stopEsp,
+        setMostExpensive = setMostExpensive,
+        brainrotToggle = mainToggle,
+        mostExpensiveToggle = expensiveToggle,
     }
+end
 
-    setupToggles(state, controls)
-    return controls
+function module.start(opts)
+    opts = opts or {}
+    applyOptions(opts)
+    local controller = module.setup(opts)
+    if opts.autoStart == false then
+        stopEsp()
+    end
+    if typeof(opts.mostExpensiveOnly) == "boolean" then
+        setMostExpensive(opts.mostExpensiveOnly)
+    end
+    module.controller = controller
+    return controller
+end
+
+-- Auto attach if environment provides a section; otherwise auto-start.
+local autoSection, autoTheme, autoNotify = resolveSection()
+if autoSection then
+    module.controller = module.setup({
+        section = autoSection,
+        theme = autoTheme,
+        notify = autoNotify,
+    })
+else
+    module.controller = module.start({ autoStart = true })
 end
 
 return module
