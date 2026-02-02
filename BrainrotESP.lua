@@ -75,17 +75,17 @@ local state = {
     enabled = false,
     mostExpensiveOnly = false,
     tracked = {},
-    knownStands = setmetatable({}, { __mode = "k" }),
-    standConns = setmetatable({}, { __mode = "k" }),
+    knownStands = {},
+    standConns = {},
     lastSeen = {},
     scanToken = 0,
     connections = {},
-    podiumsConns = setmetatable({}, { __mode = "k" }),
-    baseConns = setmetatable({}, { __mode = "k" }),
+    podiumsConns = {},
+    baseConns = {},
     boundPlots = nil,
     queue = {},
-    queueSet = setmetatable({}, { __mode = "k" }),
-    forceSet = setmetatable({}, { __mode = "k" }),
+    queueSet = {},
+    forceSet = {},
     queueHead = 1,
     queueTail = 0,
     refreshList = {},
@@ -684,8 +684,6 @@ local function buildStandBrainrotInfo(stand)
         or (model and model.Name)
         or stand.Name
     local resolvedName = resolveBrainrotName(stand, model, index)
-    local key = sanitizeKey(index) or sanitizeKey(resolvedName)
-    local entry = key and animalsLookup[key]
     if not model then
         local names = {
             resolvedName,
@@ -698,8 +696,8 @@ local function buildStandBrainrotInfo(stand)
             resolvedName = resolveBrainrotName(stand, model, index)
         end
     end
-    key = sanitizeKey(index) or sanitizeKey(resolvedName)
-    entry = key and animalsLookup[key]
+    local key = sanitizeKey(index) or sanitizeKey(resolvedName)
+    local entry = key and animalsLookup[key]
     local moneyValue = computeIncome(index, mutation, traits, owner, stand, model, entry, animalData)
     if not model and moneyValue <= 0 then
         return nil
@@ -1022,9 +1020,6 @@ local function unbindBase(base)
         end
     end
     state.baseConns[base] = nil
-    if base then
-        state.baseChannelCache[base] = nil
-    end
     local podiums = base and base:FindFirstChild("AnimalPodiums")
     if podiums then
         unbindPodiums(podiums)
@@ -1177,12 +1172,12 @@ local function startEsp()
         table.clear(state.podiumsConns)
     else
         state.queue = {}
-        state.queueSet = setmetatable({}, { __mode = "k" })
-        state.forceSet = setmetatable({}, { __mode = "k" })
+        state.queueSet = {}
+        state.forceSet = {}
         state.refreshList = {}
-        state.knownStands = setmetatable({}, { __mode = "k" })
-        state.baseConns = setmetatable({}, { __mode = "k" })
-        state.podiumsConns = setmetatable({}, { __mode = "k" })
+        state.knownStands = {}
+        state.baseConns = {}
+        state.podiumsConns = {}
     end
     state.queueHead = 1
     state.queueTail = 0
@@ -1241,7 +1236,6 @@ local function stopEsp()
         clearStandVisual(stand)
     end
     destroyBeam()
-    state.baseChannelCache = {}
     state.bestMeta = nil
     state.notify("Brainrot ESP disabled")
 end
