@@ -1,4 +1,4 @@
-local Players = game:GetService("Players")
+﻿local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -75,9 +75,29 @@ local state = {
     enabled = false,
     mostExpensiveOnly = false,
     tracked = {},
+    knownStands = setmetatable({}, { __mode = "k" }),
+    standConns = setmetatable({}, { __mode = "k" }),
     lastSeen = {},
     scanToken = 0,
     connections = {},
+    podiumsConns = setmetatable({}, { __mode = "k" }),
+    baseConns = setmetatable({}, { __mode = "k" }),
+    boundPlots = nil,
+    queue = {},
+    queueSet = setmetatable({}, { __mode = "k" }),
+    forceSet = setmetatable({}, { __mode = "k" }),
+    queueHead = 1,
+    queueTail = 0,
+    refreshList = {},
+    refreshIndex = 1,
+    refreshAccumulator = 0,
+    refreshInterval = 3,
+    refreshBatch = 6,
+    standUpdateInterval = 2,
+    queueBudget = 6,
+    frameBudget = 0.003,
+    bestDirty = false,
+    lastBestRefresh = 0,
     accentColor = Color3.fromRGB(50, 130, 250),
     frameColor = Color3.fromRGB(16, 18, 24),
     textColor = Color3.fromRGB(230, 235, 240),
@@ -85,6 +105,7 @@ local state = {
         warn("[BrainrotESP] " .. tostring(msg))
     end,
     baseChannelCache = {},
+    bestMeta = nil,
 }
 
 local function isLocalOwner(owner)
@@ -144,18 +165,26 @@ local function applyOptions(opts)
 end
 
 local function updatePlayerAttachment()
+    local character = LOCAL_PLAYER and LOCAL_PLAYER.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        if state.beamAttachment0 then
+            state.beamAttachment0:Destroy()
+            state.beamAttachment0 = nil
+        end
+        return
+    end
+    if state.beamAttachment0 and state.beamAttachment0.Parent == hrp then
+        return
+    end
     if state.beamAttachment0 then
         state.beamAttachment0:Destroy()
         state.beamAttachment0 = nil
     end
-    local character = LOCAL_PLAYER and LOCAL_PLAYER.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        local attachment = Instance.new("Attachment")
-        attachment.Name = "BrainrotESPPivot"
-        attachment.Parent = hrp
-        state.beamAttachment0 = attachment
-    end
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "BrainrotESPPivot"
+    attachment.Parent = hrp
+    state.beamAttachment0 = attachment
     if state.beam and state.beamAttachment0 then
         state.beam.Attachment0 = state.beamAttachment0
     end
@@ -204,6 +233,20 @@ local function setBeamTarget(meta)
     elseif state.beam then
         state.beam.Enabled = false
     end
+end
+
+local function computeBestMeta()
+    local bestMeta
+    local bestIncome = -math.huge
+    for _, meta in pairs(state.tracked) do
+        local income = meta.income or 0
+        if income > bestIncome then
+            bestIncome = income
+            bestMeta = meta
+        end
+    end
+    state.bestMeta = bestMeta
+    return bestMeta
 end
 
 local function getPlotsFolder()
@@ -682,21 +725,13 @@ local function setVisualVisibility(meta, visible)
 end
 
 local function refreshMostExpensiveVisibility()
+    local bestMeta = computeBestMeta()
     if not state.mostExpensiveOnly then
         for _, meta in pairs(state.tracked) do
             setVisualVisibility(meta, state.enabled)
         end
         setBeamTarget(nil)
         return
-    end
-    local bestMeta
-    local bestIncome = -math.huge
-    for _, meta in pairs(state.tracked) do
-        local income = meta.income or 0
-        if income > bestIncome then
-            bestIncome = income
-            bestMeta = meta
-        end
     end
     for _, meta in pairs(state.tracked) do
         local visible = bestMeta and meta == bestMeta
@@ -705,7 +740,7 @@ local function refreshMostExpensiveVisibility()
     setBeamTarget(bestMeta)
 end
 
-local function cleanupStand(stand)
+local function clearStandVisual(stand)
     local meta = state.tracked[stand]
     if not meta then
         return
@@ -720,10 +755,31 @@ local function cleanupStand(stand)
         meta.targetAttachment:Destroy()
     end
     state.tracked[stand] = nil
+    if state.bestMeta == meta then
+        computeBestMeta()
+    end
+    state.bestDirty = true
+end
+
+local function untrackStand(stand)
+    clearStandVisual(stand)
+    state.knownStands[stand] = nil
+    state.queueSet[stand] = nil
+    state.forceSet[stand] = nil
+    local conn = state.standConns[stand]
+    if conn then
+        safeCall(function()
+            conn:Disconnect()
+        end)
+    end
+    state.standConns[stand] = nil
 end
 
 local function applyStandInfo(meta, info)
     meta.income = info.moneyValue or 0
+    meta.root = info.root
+    meta.model = info.model
+    meta.base = info.base
     meta.nameLabel.Text = info.name or "Brainrot"
     meta.rateLabel.Text = string.format("$%s/sec", formatNumber(meta.income))
     local adornee = info.root
@@ -833,56 +889,272 @@ local function updateStandEsp(stand)
     if not state.enabled then
         return
     end
-    local info = safeCall(buildStandBrainrotInfo, stand)
-    if not info then
-        cleanupStand(stand)
+    local meta = state.tracked[stand]
+    local now = os.clock()
+    if meta and meta.nextUpdateAt and now < meta.nextUpdateAt then
         return
     end
-    local meta = state.tracked[stand]
+    local info = safeCall(buildStandBrainrotInfo, stand)
+    if not info then
+        clearStandVisual(stand)
+        return
+    end
     if not meta then
         meta = createStandVisual(info)
         state.tracked[stand] = meta
     end
     applyStandInfo(meta, info)
-    state.lastSeen[stand] = state.scanToken
+    meta.nextUpdateAt = now + (state.standUpdateInterval or 2)
+    state.bestDirty = true
 end
 
-local function scanAllStands()
-    state.scanToken = state.scanToken + 1
-    local plots = getPlotsFolder()
-    if plots then
-        for _, base in ipairs(plots:GetChildren()) do
-            local podiums = base:FindFirstChild("AnimalPodiums")
-            if podiums then
-                for _, stand in ipairs(podiums:GetChildren()) do
-                    updateStandEsp(stand)
-                end
-            end
+local function enqueueStand(stand, force)
+    if not (stand and stand.Parent) then
+        return
+    end
+    if state.queueSet[stand] then
+        if force then
+            state.forceSet[stand] = true
         end
-    else
-        for _, podiums in ipairs(Workspace:GetDescendants()) do
-            if podiums.Name == "AnimalPodiums" then
-                for _, stand in ipairs(podiums:GetChildren()) do
-                    updateStandEsp(stand)
-                end
+        return
+    end
+    state.queueSet[stand] = true
+    if force then
+        state.forceSet[stand] = true
+    end
+    state.queueTail = state.queueTail + 1
+    state.queue[state.queueTail] = stand
+end
+
+local function dequeueStand()
+    if state.queueHead > state.queueTail then
+        return nil
+    end
+    local stand = state.queue[state.queueHead]
+    state.queue[state.queueHead] = nil
+    state.queueHead = state.queueHead + 1
+    if state.queueHead > state.queueTail then
+        state.queueHead = 1
+        state.queueTail = 0
+    end
+    return stand
+end
+
+local function trackStand(stand)
+    if not (stand and stand:IsA("Model") and stand.Parent) then
+        return
+    end
+    if state.knownStands[stand] then
+        return
+    end
+    state.knownStands[stand] = true
+    local conn
+    conn = stand.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            untrackStand(stand)
+        end
+    end)
+    state.standConns[stand] = conn
+    enqueueStand(stand, true)
+end
+
+local function unbindPodiums(podiums)
+    local conns = state.podiumsConns[podiums]
+    if conns then
+        for _, conn in pairs(conns) do
+            safeCall(function()
+                conn:Disconnect()
+            end)
+        end
+    end
+    state.podiumsConns[podiums] = nil
+    if podiums then
+        for _, stand in ipairs(podiums:GetChildren()) do
+            if stand:IsA("Model") then
+                untrackStand(stand)
             end
         end
     end
-    for stand, meta in pairs(state.tracked) do
-        if state.lastSeen[stand] ~= state.scanToken then
-            cleanupStand(stand)
+end
+
+local function bindPodiums(podiums)
+    if not (podiums and podiums.Parent) then
+        return
+    end
+    if state.podiumsConns[podiums] then
+        return
+    end
+    local function onAdded(child)
+        if child:IsA("Model") then
+            trackStand(child)
         end
     end
-    refreshMostExpensiveVisibility()
+    local function onRemoved(child)
+        if child:IsA("Model") then
+            untrackStand(child)
+        end
+    end
+    for _, stand in ipairs(podiums:GetChildren()) do
+        if stand:IsA("Model") then
+            trackStand(stand)
+        end
+    end
+    state.podiumsConns[podiums] = {
+        added = podiums.ChildAdded:Connect(onAdded),
+        removed = podiums.ChildRemoved:Connect(onRemoved),
+        ancestry = podiums.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                unbindPodiums(podiums)
+            end
+        end),
+    }
+end
+
+local function unbindBase(base)
+    local conns = state.baseConns[base]
+    if conns then
+        for _, conn in pairs(conns) do
+            safeCall(function()
+                conn:Disconnect()
+            end)
+        end
+    end
+    state.baseConns[base] = nil
+    local podiums = base and base:FindFirstChild("AnimalPodiums")
+    if podiums then
+        unbindPodiums(podiums)
+    end
+end
+
+local function bindBase(base)
+    if not (base and base.Parent) then
+        return
+    end
+    if state.baseConns[base] then
+        return
+    end
+    local function onChildAdded(child)
+        if child and child.Name == "AnimalPodiums" then
+            bindPodiums(child)
+        end
+    end
+    state.baseConns[base] = {
+        added = base.ChildAdded:Connect(onChildAdded),
+        ancestry = base.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                unbindBase(base)
+            end
+        end),
+    }
+    local podiums = base:FindFirstChild("AnimalPodiums")
+    if podiums then
+        bindPodiums(podiums)
+    end
+end
+
+local function unbindPlots(plots)
+    if state.connections.plotsChildAdded then
+        safeCall(function()
+            state.connections.plotsChildAdded:Disconnect()
+        end)
+        state.connections.plotsChildAdded = nil
+    end
+    if state.connections.plotsChildRemoved then
+        safeCall(function()
+            state.connections.plotsChildRemoved:Disconnect()
+        end)
+        state.connections.plotsChildRemoved = nil
+    end
+    for base in pairs(state.baseConns) do
+        unbindBase(base)
+    end
+    state.boundPlots = nil
+end
+
+local function bindPlots(plots)
+    if not plots then
+        return
+    end
+    if state.boundPlots == plots then
+        return
+    end
+    if state.boundPlots then
+        unbindPlots(state.boundPlots)
+    end
+    state.boundPlots = plots
+    for _, base in ipairs(plots:GetChildren()) do
+        bindBase(base)
+    end
+    state.connections.plotsChildAdded = plots.ChildAdded:Connect(function(child)
+        bindBase(child)
+    end)
+    state.connections.plotsChildRemoved = plots.ChildRemoved:Connect(function(child)
+        if child then
+            unbindBase(child)
+        end
+    end)
+end
+
+local function processQueue()
+    local now = os.clock()
+    local start = now
+    local budget = state.queueBudget or 6
+    while budget > 0 do
+        local stand = dequeueStand()
+        if not stand then
+            break
+        end
+        state.queueSet[stand] = nil
+        local force = state.forceSet[stand]
+        state.forceSet[stand] = nil
+        if stand and stand.Parent then
+            if force then
+                local meta = state.tracked[stand]
+                if meta then
+                    meta.nextUpdateAt = 0
+                end
+            end
+            updateStandEsp(stand)
+        else
+            untrackStand(stand)
+        end
+        budget = budget - 1
+        if (os.clock() - start) > (state.frameBudget or 0.003) then
+            break
+        end
+    end
+    if state.bestDirty and (now - (state.lastBestRefresh or 0)) >= 0.5 then
+        refreshMostExpensiveVisibility()
+        state.bestDirty = false
+        state.lastBestRefresh = now
+    end
 end
 
 local function heartbeatStep(dt)
-    state.accumulator = (state.accumulator or 0) + dt
-    if state.accumulator < 1 then
+    if not state.enabled then
         return
     end
-    state.accumulator = 0
-    scanAllStands()
+    state.refreshAccumulator = (state.refreshAccumulator or 0) + dt
+    if state.refreshAccumulator >= (state.refreshInterval or 3) then
+        state.refreshAccumulator = 0
+        if table.clear then
+            table.clear(state.refreshList)
+        else
+            state.refreshList = {}
+        end
+        for stand in pairs(state.knownStands) do
+            state.refreshList[#state.refreshList + 1] = stand
+        end
+        state.refreshIndex = 1
+    end
+    local batch = state.refreshBatch or 6
+    while batch > 0 and state.refreshIndex <= #state.refreshList do
+        local stand = state.refreshList[state.refreshIndex]
+        state.refreshIndex = state.refreshIndex + 1
+        enqueueStand(stand, false)
+        batch = batch - 1
+    end
+    processQueue()
 end
 
 local function startEsp()
@@ -890,18 +1162,55 @@ local function startEsp()
         return
     end
     state.enabled = true
-    scanAllStands()
+    if table.clear then
+        table.clear(state.queue)
+        table.clear(state.queueSet)
+        table.clear(state.forceSet)
+        table.clear(state.refreshList)
+        table.clear(state.knownStands)
+        table.clear(state.baseConns)
+        table.clear(state.podiumsConns)
+    else
+        state.queue = {}
+        state.queueSet = setmetatable({}, { __mode = "k" })
+        state.forceSet = setmetatable({}, { __mode = "k" })
+        state.refreshList = {}
+        state.knownStands = setmetatable({}, { __mode = "k" })
+        state.baseConns = setmetatable({}, { __mode = "k" })
+        state.podiumsConns = setmetatable({}, { __mode = "k" })
+    end
+    state.queueHead = 1
+    state.queueTail = 0
+    state.refreshIndex = 1
+    state.refreshAccumulator = 0
+    state.bestDirty = true
+    state.lastBestRefresh = 0
+    local plots = getPlotsFolder()
+    if plots then
+        bindPlots(plots)
+        state.connections.workspaceChildAdded = Workspace.ChildAdded:Connect(function(child)
+            if child and child.Name == "Plots" then
+                bindPlots(child)
+            end
+        end)
+        state.connections.workspaceChildRemoved = Workspace.ChildRemoved:Connect(function(child)
+            if child and child == state.boundPlots then
+                unbindPlots(child)
+            end
+        end)
+    else
+        for _, inst in ipairs(Workspace:GetDescendants()) do
+            if inst.Name == "AnimalPodiums" then
+                bindPodiums(inst)
+            end
+        end
+        state.connections.descAdded = Workspace.DescendantAdded:Connect(function(inst)
+            if inst and inst.Name == "AnimalPodiums" then
+                bindPodiums(inst)
+            end
+        end)
+    end
     state.connections.heartbeat = RunService.Heartbeat:Connect(heartbeatStep)
-    state.connections.descAdded = Workspace.DescendantAdded:Connect(function(inst)
-        if state.enabled and inst:IsA("Model") and inst.Parent and inst.Parent.Name == "AnimalPodiums" then
-            updateStandEsp(inst)
-        end
-    end)
-    state.connections.descRemoving = Workspace.DescendantRemoving:Connect(function(inst)
-        if inst:IsA("Model") and state.tracked[inst] then
-            cleanupStand(inst)
-        end
-    end)
     state.notify("Brainrot ESP enabled")
 end
 
@@ -916,16 +1225,37 @@ local function stopEsp()
         end)
     end
     state.connections = {}
+    unbindPlots(state.boundPlots)
+    for podiums in pairs(state.podiumsConns) do
+        unbindPodiums(podiums)
+    end
+    for stand in pairs(state.knownStands) do
+        untrackStand(stand)
+    end
     for stand in pairs(state.tracked) do
-        cleanupStand(stand)
+        clearStandVisual(stand)
     end
     destroyBeam()
+    state.bestMeta = nil
     state.notify("Brainrot ESP disabled")
 end
 
 local function setMostExpensive(value)
     state.mostExpensiveOnly = value and true or false
+    state.bestDirty = true
     refreshMostExpensiveVisibility()
+end
+
+local function getBestBrainrot()
+    local meta = computeBestMeta()
+    if not meta then
+        return nil
+    end
+    local target = meta.currentAdornee or meta.root
+    if target and target.Parent then
+        return target, meta
+    end
+    return nil
 end
 
 local function attachUi(section)
@@ -1008,6 +1338,7 @@ function module.setup(opts)
         start = startEsp,
         stop = stopEsp,
         setMostExpensive = setMostExpensive,
+        getBestBrainrot = getBestBrainrot,
         brainrotToggle = mainToggle,
         mostExpensiveToggle = expensiveToggle,
     }
@@ -1027,6 +1358,8 @@ function module.start(opts)
     return controller
 end
 
+module.getBestBrainrot = getBestBrainrot
+
 -- Auto attach if environment provides a section; otherwise auto-start.
 local autoSection, autoTheme, autoNotify = resolveSection()
 if autoSection then
@@ -1040,3 +1373,4 @@ else
 end
 
 return module
+
