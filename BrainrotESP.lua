@@ -684,6 +684,8 @@ local function buildStandBrainrotInfo(stand)
         or (model and model.Name)
         or stand.Name
     local resolvedName = resolveBrainrotName(stand, model, index)
+    local key = sanitizeKey(index) or sanitizeKey(resolvedName)
+    local entry = key and animalsLookup[key]
     if not model then
         local names = {
             resolvedName,
@@ -696,8 +698,8 @@ local function buildStandBrainrotInfo(stand)
             resolvedName = resolveBrainrotName(stand, model, index)
         end
     end
-    local key = sanitizeKey(index) or sanitizeKey(resolvedName)
-    local entry = key and animalsLookup[key]
+    key = sanitizeKey(index) or sanitizeKey(resolvedName)
+    entry = key and animalsLookup[key]
     local moneyValue = computeIncome(index, mutation, traits, owner, stand, model, entry, animalData)
     if not model and moneyValue <= 0 then
         return nil
@@ -1020,6 +1022,9 @@ local function unbindBase(base)
         end
     end
     state.baseConns[base] = nil
+    if base then
+        state.baseChannelCache[base] = nil
+    end
     local podiums = base and base:FindFirstChild("AnimalPodiums")
     if podiums then
         unbindPodiums(podiums)
@@ -1236,6 +1241,7 @@ local function stopEsp()
         clearStandVisual(stand)
     end
     destroyBeam()
+    state.baseChannelCache = {}
     state.bestMeta = nil
     state.notify("Brainrot ESP disabled")
 end
